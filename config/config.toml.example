@@ -1,0 +1,35 @@
+[server]
+port = 8080
+host = "0.0.0.0"
+db_path = "data/alfred.db"
+
+[llm]
+default_provider = "openai"
+
+[llm.providers.openai]
+api_key = "${OPENAI_API_KEY}"
+model = "gpt-4o"
+
+[llm.providers.anthropic]
+api_key = "${ANTHROPIC_API_KEY}"
+model = "claude-sonnet-4-20250514"
+
+[llm.providers.google]
+api_key = "${GOOGLE_API_KEY}"
+model = "gemini-2.0-flash"
+
+[llm.providers.deepseek]
+api_key = "${DEEPSEEK_API_KEY}"
+model = "deepseek-v4-flash"
+base_url = "https://api.deepseek.com"
+
+# [telegram]
+# bot_token = "${TELEGRAM_BOT_TOKEN}"
+# allowed_users = []
+
+[prompt]
+system_prompt_file = "prompts/system.md"
+user_prompt_file = "prompts/user.md"
+
+[scheduler]
+enabled = true

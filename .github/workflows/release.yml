@@ -1,0 +1,156 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            platform: linux-x64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            platform: linux-arm64
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            platform: macos-x64
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            platform: macos-arm64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            platform: windows-x64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build
+        run: |
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          fi
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Package (Unix)
+        if: matrix.platform != 'windows-x64'
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          PLATFORM=${{ matrix.platform }}
+          BINARY_NAME=alfred
+          
+          # Create staging directory
+          STAGING_DIR="alfred-${VERSION}-${PLATFORM}"
+          mkdir -p "${STAGING_DIR}"
+          
+          # Copy binary
+          cp "target/${{ matrix.target }}/release/${BINARY_NAME}" "${STAGING_DIR}/"
+          
+          # Copy config templates
+          cp config/config.toml.example "${STAGING_DIR}/" 2>/dev/null || true
+          mkdir -p "${STAGING_DIR}/prompts"
+          cp prompts/system.md.example "${STAGING_DIR}/prompts/" 2>/dev/null || true
+          cp prompts/user.md.example "${STAGING_DIR}/prompts/" 2>/dev/null || true
+          
+          # Copy README
+          cp README.md "${STAGING_DIR}/"
+          
+          # Create tarball
+          tar -czf "${STAGING_DIR}.tar.gz" "${STAGING_DIR}"
+          
+          # Generate checksum
+          sha256sum "${STAGING_DIR}.tar.gz" > "${STAGING_DIR}.tar.gz.sha256"
+
+      - name: Package (Windows)
+        if: matrix.platform == 'windows-x64'
+        shell: pwsh
+        run: |
+          $VERSION = $env:GITHUB_REF_NAME -replace '^v', ''
+          $PLATFORM = '${{ matrix.platform }}'
+          $STAGING_DIR = "alfred-${VERSION}-${PLATFORM}"
+          
+          New-Item -ItemType Directory -Path $STAGING_DIR -Force
+          
+          # Copy binary
+          Copy-Item "target/${{ matrix.target }}/release/alfred.exe" "${STAGING_DIR}/"
+          
+          # Copy config templates
+          if (Test-Path "config/config.toml.example") {
+              Copy-Item "config/config.toml.example" "${STAGING_DIR}/"
+          }
+          New-Item -ItemType Directory -Path "${STAGING_DIR}/prompts" -Force
+          if (Test-Path "prompts/system.md.example") {
+              Copy-Item "prompts/system.md.example" "${STAGING_DIR}/prompts/"
+          }
+          if (Test-Path "prompts/user.md.example") {
+              Copy-Item "prompts/user.md.example" "${STAGING_DIR}/prompts/"
+          }
+          
+          # Copy README
+          Copy-Item "README.md" "${STAGING_DIR}/"
+          
+          # Create zip
+          Compress-Archive -Path $STAGING_DIR -DestinationPath "${STAGING_DIR}.zip"
+          
+          # Generate checksum
+          $hash = (Get-FileHash -Path "${STAGING_DIR}.zip" -Algorithm SHA256).Hash.ToLower()
+          "${hash}  ${STAGING_DIR}.zip" | Out-File -FilePath "${STAGING_DIR}.zip.sha256" -Encoding utf8
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: alfred-${{ matrix.platform }}
+          path: |
+            alfred-*.tar.gz
+            alfred-*.tar.gz.sha26
+            alfred-*.zip
+            alfred-*.zip.sha256
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            artifacts/alfred-*.tar.gz
+            artifacts/alfred-*.tar.gz.sha256
+            artifacts/alfred-*.zip
+            artifacts/alfred-*.zip.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

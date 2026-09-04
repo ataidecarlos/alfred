@@ -1,0 +1,39 @@
+/target
+
+# User config files (auto-generated, not tracked)
+/config/config.toml
+/prompts/system.md
+/prompts/user.md
+
+# Runtime data
+/data/
+/logs/
+
+# Legacy config in root
+/config.toml
+
+# Pi reference code (not part of this project)
+/pi/
+
+# Editor artifacts
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.exe
+*.pdb
+*.dll
+
+# Environment files
+.env
+.env.local
+
+# Local variables (contains secrets)
+local_vars.txt
