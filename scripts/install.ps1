@@ -8,7 +8,7 @@
     Version to install (default: latest)
 .EXAMPLE
     .\install.ps1
-    .\install.ps1 -Version 2026.09.04
+    .\install.ps1 -Version 20260904
 #>
 
 param(
@@ -18,7 +18,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 # Configuration
-$GitHubRepo = "yourusername/alfred"
+$GitHubRepo = "ataidecarlos/alfred"
 $GitHubApi = "https://api.github.com/repos/$GitHubRepo"
 $InstallDir = "$env:LOCALAPPDATA\bin"
 $ConfigDir = "$env:APPDATA\alfred"
@@ -55,7 +55,7 @@ function Get-LatestVersion {
 function Get-Release {
     param([string]$Version, [string]$Platform)
 
-    $archiveName = "alfred-$Version-$Platform.zip"
+    $archiveName = "alfred-v$Version-$Platform.zip"
     $downloadUrl = "https://github.com/$GitHubRepo/releases/download/v$Version/$archiveName"
     $checksumUrl = "$downloadUrl.sha256"
 
@@ -107,6 +107,7 @@ function Install-Binary {
 
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 
+    # Copy binary (renamed from alfred-v* to alfred.exe)
     $sourceBinary = Join-Path $SourceDir "alfred.exe"
     $destBinary = Join-Path $InstallDir "alfred.exe"
 

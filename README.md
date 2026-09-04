@@ -26,7 +26,7 @@ iwr -useb https://raw.githubusercontent.com/ataidecarlos/alfred/main/scripts/ins
 
 ### Manual Installation
 
-Download the latest release from [GitHub Releases](https://github.com/ataidecarlos/alfred/releases), extract, and follow the instructions in [INSTALL.md](INSTALL.md).
+Download the latest release from [GitHub Releases](https://github.com/ataidecarlos/alfred/releases), extract, and follow the instructions in [INSTALL.md](scripts/INSTALL.md).
 
 ## Configuration
 
@@ -60,7 +60,19 @@ alfred
 alfred --tui
 ```
 
-### API Endpoints
+### Update
+
+**Linux/Mac:**
+```bash
+~/.local/bin/alfred/scripts/update.sh
+```
+
+**Windows (PowerShell):**
+```powershell
+& "$env:LOCALAPPDATA\bin\scripts\update.ps1"
+```
+
+## API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -73,9 +85,10 @@ alfred --tui
 
 ## Documentation
 
-- [INSTALL.md](INSTALL.md) - Detailed installation guide
-- [UPGRADE.md](UPGRADE.md) - Upgrade instructions
-- [RELEASE.md](RELEASE.md) - Release process
+- [INSTALL.md](scripts/INSTALL.md) - Detailed installation guide
+- [UPGRADE.md](scripts/UPGRADE.md) - Upgrade instructions
+- [RELEASE.md](scripts/RELEASE.md) - Release process
+- [ROADMAP.md](ROADMAP.md) - Upcoming features
 
 ## Supported Providers
 

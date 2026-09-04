@@ -61,15 +61,14 @@ jobs:
           BINARY_NAME=alfred
           
           # Create staging directory
-          STAGING_DIR="alfred-${VERSION}-${PLATFORM}"
-          mkdir -p "${STAGING_DIR}"
+          STAGING_DIR="alfred-v${VERSION}-${PLATFORM}"
+          mkdir -p "${STAGING_DIR}/prompts"
           
-          # Copy binary
+          # Copy binary (rename to just 'alfred')
           cp "target/${{ matrix.target }}/release/${BINARY_NAME}" "${STAGING_DIR}/"
           
           # Copy config templates
           cp config/config.toml.example "${STAGING_DIR}/" 2>/dev/null || true
-          mkdir -p "${STAGING_DIR}/prompts"
           cp prompts/system.md.example "${STAGING_DIR}/prompts/" 2>/dev/null || true
           cp prompts/user.md.example "${STAGING_DIR}/prompts/" 2>/dev/null || true
           
@@ -88,18 +87,18 @@ jobs:
         run: |
           $VERSION = $env:GITHUB_REF_NAME -replace '^v', ''
           $PLATFORM = '${{ matrix.platform }}'
-          $STAGING_DIR = "alfred-${VERSION}-${PLATFORM}"
+          $STAGING_DIR = "alfred-v${VERSION}-${PLATFORM}"
           
           New-Item -ItemType Directory -Path $STAGING_DIR -Force
+          New-Item -ItemType Directory -Path "${STAGING_DIR}/prompts" -Force
           
-          # Copy binary
+          # Copy binary (rename to just 'alfred.exe')
           Copy-Item "target/${{ matrix.target }}/release/alfred.exe" "${STAGING_DIR}/"
           
           # Copy config templates
           if (Test-Path "config/config.toml.example") {
               Copy-Item "config/config.toml.example" "${STAGING_DIR}/"
           }
-          New-Item -ItemType Directory -Path "${STAGING_DIR}/prompts" -Force
           if (Test-Path "prompts/system.md.example") {
               Copy-Item "prompts/system.md.example" "${STAGING_DIR}/prompts/"
           }
@@ -123,7 +122,7 @@ jobs:
           name: alfred-${{ matrix.platform }}
           path: |
             alfred-*.tar.gz
-            alfred-*.tar.gz.sha26
+            alfred-*.tar.gz.sha256
             alfred-*.zip
             alfred-*.zip.sha256
 

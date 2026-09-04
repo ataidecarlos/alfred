@@ -3,12 +3,14 @@ set -e
 
 # Alfred Package Release Script
 # Creates release archives with binaries and config templates
+# Version is calculated as YYYYMMDD based on current date
 
-VERSION=$(date +%Y.%m.%d)
+VERSION=$(date +%Y%m%d)
 RELEASE_DIR="releases"
 BUILD_DIR="target/release-builds"
 
 echo "Packaging Alfred v${VERSION}"
+echo "==========================="
 
 # Clean previous releases
 rm -rf ${RELEASE_DIR}
@@ -22,7 +24,8 @@ cd "$PROJECT_DIR"
 
 # Check if builds exist
 if [ ! -d "${BUILD_DIR}" ]; then
-    echo "Error: Build directory not found. Run build-release.sh first."
+    echo "Error: Build directory not found."
+    echo "Run: ./scripts/build-release.sh"
     exit 1
 fi
 
@@ -44,24 +47,24 @@ for TARGET_INFO in "${TARGETS[@]}"; do
         continue
     fi
 
+    echo ""
     echo "Packaging for ${PLATFORM}..."
 
     # Create staging directory
-    STAGING_DIR="${RELEASE_DIR}/alfred-${VERSION}-${PLATFORM}"
-    mkdir -p "${STAGING_DIR}"
+    STAGING_DIR="${RELEASE_DIR}/alfred-v${VERSION}-${PLATFORM}"
+    mkdir -p "${STAGING_DIR}/prompts"
 
-    # Copy binary
+    # Copy binary (rename to just 'alfred')
     if [ "${TARGET}" = "x86_64-pc-windows-msvc" ]; then
         BINARY_EXT=".exe"
     else
         BINARY_EXT=""
     fi
 
-    cp "${TARGET_DIR}/alfred${BINARY_EXT}" "${STAGING_DIR}/"
+    cp "${TARGET_DIR}/alfred-v${VERSION}${BINARY_EXT}" "${STAGING_DIR}/alfred${BINARY_EXT}"
 
     # Copy config templates
     cp config/config.toml.example "${STAGING_DIR}/" 2>/dev/null || true
-    mkdir -p "${STAGING_DIR}/prompts"
     cp prompts/system.md.example "${STAGING_DIR}/prompts/" 2>/dev/null || true
     cp prompts/user.md.example "${STAGING_DIR}/prompts/" 2>/dev/null || true
 
@@ -72,12 +75,12 @@ for TARGET_INFO in "${TARGETS[@]}"; do
     cd "${RELEASE_DIR}"
     if [ "${TARGET}" = "x86_64-pc-windows-msvc" ]; then
         # Create zip for Windows
-        zip -r "alfred-${VERSION}-${PLATFORM}.zip" "alfred-${VERSION}-${PLATFORM}/"
-        ARCHIVE_NAME="alfred-${VERSION}-${PLATFORM}.zip"
+        zip -r "alfred-v${VERSION}-${PLATFORM}.zip" "alfred-v${VERSION}-${PLATFORM}/"
+        ARCHIVE_NAME="alfred-v${VERSION}-${PLATFORM}.zip"
     else
         # Create tarball for Linux/Mac
-        tar -czf "alfred-${VERSION}-${PLATFORM}.tar.gz" "alfred-${VERSION}-${PLATFORM}/"
-        ARCHIVE_NAME="alfred-${VERSION}-${PLATFORM}.tar.gz"
+        tar -czf "alfred-v${VERSION}-${PLATFORM}.tar.gz" "alfred-v${VERSION}-${PLATFORM}/"
+        ARCHIVE_NAME="alfred-v${VERSION}-${PLATFORM}.tar.gz"
     fi
     cd "${PROJECT_DIR}"
 
@@ -91,5 +94,7 @@ for TARGET_INFO in "${TARGETS[@]}"; do
 done
 
 echo ""
-echo "Packaging complete! Archives are in: ${RELEASE_DIR}"
+echo "==========================="
+echo "Packaging complete!"
 echo "Version: ${VERSION}"
+echo "Archives are in: ${RELEASE_DIR}"

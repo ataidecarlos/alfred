@@ -2,7 +2,7 @@
 set -e
 
 # Alfred Installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/yourusername/alfred/main/scripts/install.sh | sh
+# Usage: curl -fsSL https://raw.githubusercontent.com/ataidecarlos/alfred/main/scripts/install.sh | sh
 
 ALFRED_VERSION="${1:-latest}"
 INSTALL_DIR="${HOME}/.local/bin"
@@ -10,7 +10,7 @@ CONFIG_DIR="${HOME}/.config/alfred"
 DATA_DIR="${HOME}/.local/share/alfred"
 CACHE_DIR="${HOME}/.cache/alfred"
 
-GITHUB_REPO="yourusername/alfred"
+GITHUB_REPO="ataidecarlos/alfred"
 GITHUB_API="https://api.github.com/repos/${GITHUB_REPO}"
 
 RED='\033[0;31m'
@@ -74,7 +74,7 @@ get_latest_version() {
 
 # Download release
 download_release() {
-    local DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/download/v${ALFRED_VERSION}/alfred-${ALFRED_VERSION}-${PLATFORM}.tar.gz"
+    local DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/download/v${ALFRED_VERSION}/alfred-v${ALFRED_VERSION}-${PLATFORM}.tar.gz"
     local TEMP_DIR=$(mktemp -d)
 
     log_info "Downloading ${DOWNLOAD_URL}..."
@@ -114,8 +114,8 @@ install_binary() {
 
     mkdir -p "${INSTALL_DIR}"
 
-    # Copy binary
-    cp "${EXTRACTED_DIR}/alfred" "${INSTALL_DIR}/"
+    # Copy binary (renamed from alfred-v* to alfred)
+    cp "${EXTRACTED_DIR}/alfred" "${INSTALL_DIR}/alfred"
     chmod +x "${INSTALL_DIR}/alfred"
 
     log_info "Binary installed: ${INSTALL_DIR}/alfred"
