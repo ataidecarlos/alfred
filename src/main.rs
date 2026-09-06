@@ -37,7 +37,7 @@ const EXAMPLE_SYSTEM_PROMPT: &str = "prompts/system.md.example";
 const EXAMPLE_USER_PROMPT: &str = "prompts/user.md.example";
 
 #[derive(Parser)]
-#[command(name = "alfred", about = "24x7 AI agent server")]
+#[command(name = "alfred", about = "24x7 AI agent server", version = env!("CARGO_PKG_VERSION"))]
 struct Cli {
     /// Path to config file
     #[arg(short, long)]
