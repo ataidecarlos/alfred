@@ -12,7 +12,8 @@
 #>
 
 param(
-    [string]$Version = "latest"
+    [string]$Version = "latest",
+    [string]$Token = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -30,6 +31,19 @@ function Write-Info { Write-Host -ForegroundColor Green "[INFO] $args" }
 function Write-Warn { Write-Host -ForegroundColor Yellow "[WARN] $args" }
 function Write-Error { Write-Host -ForegroundColor Red "[ERROR] $args" }
 
+# Get GitHub headers with authentication
+function Get-GitHubHeaders {
+    $headers = @{
+        "Accept" = "application/vnd.github.v3+json"
+    }
+    if ($Token) {
+        $headers["Authorization"] = "token $Token"
+    } elseif ($env:GH_PAT) {
+        $headers["Authorization"] = "token $env:GH_PAT"
+    }
+    return $headers
+}
+
 # Detect architecture
 function Get-Platform {
     $arch = [System.Environment]::Is64BitOperatingSystem
@@ -44,7 +58,8 @@ function Get-Platform {
 # Get latest version from GitHub
 function Get-LatestVersion {
     if ($Version -eq "latest") {
-        $release = Invoke-RestMethod -Uri "$GitHubApi/releases/latest"
+        $headers = Get-GitHubHeaders
+        $release = Invoke-RestMethod -Uri "$GitHubApi/releases/latest" -Headers $headers
         $Version = $release.tag_name -replace '^v', ''
     }
     Write-Info "Version: $Version"
@@ -62,15 +77,34 @@ function Get-Release {
     $tempDir = Join-Path $env:TEMP "alfred-install-$(Get-Random)"
     New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
 
-    Write-Info "Downloading $downloadUrl..."
+    Write-Info "Downloading $archiveName..."
 
-    # Download archive
+    # Get release assets via API (required for private repos)
+    $headers = Get-GitHubHeaders
+    $release = Invoke-RestMethod -Uri "$GitHubApi/releases/tags/v$Version" -Headers $headers
+    $asset = $release.assets | Where-Object { $_.name -eq $archiveName }
+    
+    if (-not $asset) {
+        Write-Error "Asset $archiveName not found in release v$Version"
+        exit 1
+    }
+
+    # Download archive using API URL with authentication
     $archivePath = Join-Path $tempDir $archiveName
-    Invoke-WebRequest -Uri $downloadUrl -OutFile $archivePath
+    $downloadHeaders = @{"Accept" = "application/octet-stream"}
+    if ($Token) {
+        $downloadHeaders["Authorization"] = "token $Token"
+    } elseif ($env:GH_PAT) {
+        $downloadHeaders["Authorization"] = "token $env:GH_PAT"
+    }
+    Invoke-WebRequest -Uri $asset.url -OutFile $archivePath -Headers $downloadHeaders
 
     # Download and verify checksum
+    $checksumAsset = $release.assets | Where-Object { $_.name -eq "$archiveName.sha256" }
     $checksumPath = "$archivePath.sha256"
-    Invoke-WebRequest -Uri $checksumUrl -OutFile $checksumPath
+    if ($checksumAsset) {
+        Invoke-WebRequest -Uri $checksumAsset.url -OutFile $checksumPath -Headers $downloadHeaders
+    }
 
     $expectedHash = (Get-Content $checksumPath -Raw).Split(' ')[0].Trim()
     $actualHash = (Get-FileHash -Path $archivePath -Algorithm SHA256).Hash.ToLower()
