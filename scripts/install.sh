@@ -3,6 +3,7 @@ set -e
 
 # Alfred Installer
 # Usage: curl -fsSL https://raw.githubusercontent.com/ataidecarlos/alfred/main/scripts/install.sh | sh
+# For private repos: GH_PAT=your_token curl -fsSL ... | sh
 
 ALFRED_VERSION="${1:-latest}"
 INSTALL_DIR="${HOME}/.local/bin"
@@ -12,6 +13,13 @@ CACHE_DIR="${HOME}/.cache/alfred"
 
 GITHUB_REPO="ataidecarlos/alfred"
 GITHUB_API="https://api.github.com/repos/${GITHUB_REPO}"
+
+# Authentication
+if [ -n "$GH_PAT" ]; then
+    AUTH_HEADER="Authorization: token $GH_PAT"
+else
+    AUTH_HEADER=""
+fi
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -74,22 +82,60 @@ get_latest_version() {
 
 # Download release
 download_release() {
-    local DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/download/v${ALFRED_VERSION}/alfred-v${ALFRED_VERSION}-${PLATFORM}.tar.gz"
     local TEMP_DIR=$(mktemp -d)
+    local ARCHIVE_NAME="alfred-v${ALFRED_VERSION}-${PLATFORM}.tar.gz"
 
-    log_info "Downloading ${DOWNLOAD_URL}..."
+    # Get release assets via API (required for private repos)
+    local RELEASE_JSON
+    if [ -n "$AUTH_HEADER" ]; then
+        RELEASE_JSON=$(curl -s -H "$AUTH_HEADER" "${GITHUB_API}/releases/tags/v${ALFRED_VERSION}")
+    else
+        RELEASE_JSON=$(curl -s "${GITHUB_API}/releases/tags/v${ALFRED_VERSION}")
+    fi
 
-    curl -fsSL "${DOWNLOAD_URL}" -o "${TEMP_DIR}/alfred.tar.gz"
+    # Find the asset URL
+    local ASSET_URL
+    ASSET_URL=$(echo "$RELEASE_JSON" | grep -o "\"browser_download_url\": \"[^\"]*${ARCHIVE_NAME}\"" | cut -d '"' -f 4)
+
+    if [ -z "$ASSET_URL" ]; then
+        # Try API URL for private repos
+        ASSET_URL=$(echo "$RELEASE_JSON" | grep -o "\"url\": \"[^\"]*\"" | head -1 | cut -d '"' -f 4)
+        if [ -n "$ASSET_URL" ] && [ -n "$AUTH_HEADER" ]; then
+            log_info "Downloading ${ARCHIVE_NAME}..."
+            curl -fsSL -H "$AUTH_HEADER" -H "Accept: application/octet-stream" "${ASSET_URL}" -o "${TEMP_DIR}/alfred.tar.gz"
+        else
+            log_error "Could not find download URL for ${ARCHIVE_NAME}"
+            rm -rf "${TEMP_DIR}"
+            exit 1
+        fi
+    else
+        log_info "Downloading ${ASSET_URL}..."
+        if [ -n "$AUTH_HEADER" ]; then
+            curl -fsSL -H "$AUTH_HEADER" "${ASSET_URL}" -o "${TEMP_DIR}/alfred.tar.gz"
+        else
+            curl -fsSL "${ASSET_URL}" -o "${TEMP_DIR}/alfred.tar.gz"
+        fi
+    fi
 
     # Verify checksum
-    curl -fsSL "${DOWNLOAD_URL}.sha256" -o "${TEMP_DIR}/alfred.tar.gz.sha256"
-    cd "${TEMP_DIR}"
-    if ! sha256sum -c alfred.tar.gz.sha256; then
-        log_error "Checksum verification failed"
-        rm -rf "${TEMP_DIR}"
-        exit 1
+    local CHECKSUM_URL="${ASSET_URL}.sha256"
+    if [ -n "$AUTH_HEADER" ]; then
+        curl -fsSL -H "$AUTH_HEADER" "${CHECKSUM_URL}" -o "${TEMP_DIR}/alfred.tar.gz.sha256" 2>/dev/null || true
+    else
+        curl -fsSL "${CHECKSUM_URL}" -o "${TEMP_DIR}/alfred.tar.gz.sha256" 2>/dev/null || true
     fi
-    cd -
+
+    if [ -f "${TEMP_DIR}/alfred.tar.gz.sha256" ]; then
+        cd "${TEMP_DIR}"
+        if ! sha256sum -c alfred.tar.gz.sha256; then
+            log_error "Checksum verification failed"
+            rm -rf "${TEMP_DIR}"
+            exit 1
+        fi
+        cd -
+    else
+        log_warn "Checksum file not found, skipping verification"
+    fi
 
     # Extract
     tar -xzf "${TEMP_DIR}/alfred.tar.gz" -C "${TEMP_DIR}"

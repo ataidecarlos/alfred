@@ -3,6 +3,7 @@ set -e
 
 # Alfred Update Script
 # Checks for newer version and updates the installation
+# For private repos: GH_PAT=your_token ./update.sh
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -29,6 +30,13 @@ CONFIG_DIR="${HOME}/.config/alfred"
 DATA_DIR="${HOME}/.local/share/alfred"
 CACHE_DIR="${HOME}/.cache/alfred"
 
+# Authentication
+if [ -n "$GH_PAT" ]; then
+    AUTH_HEADER="Authorization: token $GH_PAT"
+else
+    AUTH_HEADER=""
+fi
+
 # Get current installed version
 get_installed_version() {
     if [ -f "${INSTALL_DIR}/alfred" ]; then
@@ -44,7 +52,11 @@ get_installed_version() {
 
 # Get latest version from GitHub
 get_latest_version() {
-    LATEST_VERSION=$(curl -s "${GITHUB_API}/releases/latest" | grep '"tag_name"' | cut -d '"' -f 4 | sed 's/^v//')
+    if [ -n "$AUTH_HEADER" ]; then
+        LATEST_VERSION=$(curl -s -H "$AUTH_HEADER" "${GITHUB_API}/releases/latest" | grep '"tag_name"' | cut -d '"' -f 4 | sed 's/^v//')
+    else
+        LATEST_VERSION=$(curl -s "${GITHUB_API}/releases/latest" | grep '"tag_name"' | cut -d '"' -f 4 | sed 's/^v//')
+    fi
     if [ -z "${LATEST_VERSION}" ]; then
         log_error "Failed to get latest version"
         exit 1
@@ -56,23 +68,54 @@ get_latest_version() {
 install_update() {
     local VERSION=$1
     local PLATFORM=$2
-
-    local DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/download/v${VERSION}/alfred-v${VERSION}-${PLATFORM}.tar.gz"
+    local ARCHIVE_NAME="alfred-v${VERSION}-${PLATFORM}.tar.gz"
     local TEMP_DIR=$(mktemp -d)
 
-    log_info "Downloading ${DOWNLOAD_URL}..."
+    # Get release assets via API
+    local RELEASE_JSON
+    if [ -n "$AUTH_HEADER" ]; then
+        RELEASE_JSON=$(curl -s -H "$AUTH_HEADER" "${GITHUB_API}/releases/tags/v${VERSION}")
+    else
+        RELEASE_JSON=$(curl -s "${GITHUB_API}/releases/tags/v${VERSION}")
+    fi
 
-    curl -fsSL "${DOWNLOAD_URL}" -o "${TEMP_DIR}/alfred.tar.gz"
+    # Find the asset URL
+    local ASSET_URL
+    ASSET_URL=$(echo "$RELEASE_JSON" | grep -o "\"browser_download_url\": \"[^\"]*${ARCHIVE_NAME}\"" | cut -d '"' -f 4)
 
-    # Verify checksum
-    curl -fsSL "${DOWNLOAD_URL}.sha256" -o "${TEMP_DIR}/alfred.tar.gz.sha256"
-    cd "${TEMP_DIR}"
-    if ! sha256sum -c alfred.tar.gz.sha256; then
-        log_error "Checksum verification failed"
+    if [ -z "$ASSET_URL" ]; then
+        log_error "Could not find download URL for ${ARCHIVE_NAME}"
         rm -rf "${TEMP_DIR}"
         exit 1
     fi
-    cd -
+
+    log_info "Downloading ${ARCHIVE_NAME}..."
+
+    if [ -n "$AUTH_HEADER" ]; then
+        curl -fsSL -H "$AUTH_HEADER" "${ASSET_URL}" -o "${TEMP_DIR}/alfred.tar.gz"
+    else
+        curl -fsSL "${ASSET_URL}" -o "${TEMP_DIR}/alfred.tar.gz"
+    fi
+
+    # Verify checksum
+    local CHECKSUM_URL="${ASSET_URL}.sha256"
+    if [ -n "$AUTH_HEADER" ]; then
+        curl -fsSL -H "$AUTH_HEADER" "${CHECKSUM_URL}" -o "${TEMP_DIR}/alfred.tar.gz.sha256" 2>/dev/null || true
+    else
+        curl -fsSL "${CHECKSUM_URL}" -o "${TEMP_DIR}/alfred.tar.gz.sha256" 2>/dev/null || true
+    fi
+
+    if [ -f "${TEMP_DIR}/alfred.tar.gz.sha256" ]; then
+        cd "${TEMP_DIR}"
+        if ! sha256sum -c alfred.tar.gz.sha256; then
+            log_error "Checksum verification failed"
+            rm -rf "${TEMP_DIR}"
+            exit 1
+        fi
+        cd -
+    else
+        log_warn "Checksum file not found, skipping verification"
+    fi
 
     # Extract
     tar -xzf "${TEMP_DIR}/alfred.tar.gz" -C "${TEMP_DIR}"
