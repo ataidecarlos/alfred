@@ -14,11 +14,10 @@ CACHE_DIR="${HOME}/.cache/alfred"
 GITHUB_REPO="ataidecarlos/alfred"
 GITHUB_API="https://api.github.com/repos/${GITHUB_REPO}"
 
-# Authentication
+# Authentication (optional, for private repos)
+AUTH_HEADER=""
 if [ -n "$GH_PAT" ]; then
     AUTH_HEADER="Authorization: token $GH_PAT"
-else
-    AUTH_HEADER=""
 fi
 
 RED='\033[0;31m'
@@ -71,7 +70,11 @@ detect_platform() {
 # Get latest version from GitHub
 get_latest_version() {
     if [ "$ALFRED_VERSION" = "latest" ]; then
-        ALFRED_VERSION=$(curl -s "${GITHUB_API}/releases/latest" | grep '"tag_name"' | cut -d '"' -f 4 | sed 's/^v//')
+        if [ -n "$AUTH_HEADER" ]; then
+            ALFRED_VERSION=$(curl -s -H "$AUTH_HEADER" "${GITHUB_API}/releases/latest" | grep '"tag_name"' | cut -d '"' -f 4 | sed 's/^v//')
+        else
+            ALFRED_VERSION=$(curl -s "${GITHUB_API}/releases/latest" | grep '"tag_name"' | cut -d '"' -f 4 | sed 's/^v//')
+        fi
         if [ -z "$ALFRED_VERSION" ]; then
             log_error "Failed to get latest version"
             exit 1
@@ -84,32 +87,37 @@ get_latest_version() {
 download_release() {
     local TEMP_DIR=$(mktemp -d)
     local ARCHIVE_NAME="alfred-v${ALFRED_VERSION}-${PLATFORM}.tar.gz"
+    local ARCHIVE_URL="https://github.com/${GITHUB_REPO}/releases/download/v${ALFRED_VERSION}/${ARCHIVE_NAME}"
 
-    # Get release assets via API (required for private repos)
-    local RELEASE_JSON
-    if [ -n "$AUTH_HEADER" ]; then
-        RELEASE_JSON=$(curl -s -H "$AUTH_HEADER" "${GITHUB_API}/releases/tags/v${ALFRED_VERSION}")
+    log_info "Downloading ${ARCHIVE_NAME}..."
+
+    # Try direct download first (works for public repos)
+    local DOWNLOAD_SUCCESS=false
+
+    if curl -fsSL "${ARCHIVE_URL}" -o "${TEMP_DIR}/alfred.tar.gz" 2>/dev/null; then
+        DOWNLOAD_SUCCESS=true
     else
-        RELEASE_JSON=$(curl -s "${GITHUB_API}/releases/tags/v${ALFRED_VERSION}")
+        log_warn "Direct download failed, trying API method..."
     fi
 
-    # Find the asset URL
-    local ASSET_URL
-    ASSET_URL=$(echo "$RELEASE_JSON" | grep -o "\"browser_download_url\": \"[^\"]*${ARCHIVE_NAME}\"" | cut -d '"' -f 4)
-
-    if [ -z "$ASSET_URL" ]; then
-        # Try API URL for private repos
-        ASSET_URL=$(echo "$RELEASE_JSON" | grep -o "\"url\": \"[^\"]*\"" | head -1 | cut -d '"' -f 4)
-        if [ -n "$ASSET_URL" ] && [ -n "$AUTH_HEADER" ]; then
-            log_info "Downloading ${ARCHIVE_NAME}..."
-            curl -fsSL -H "$AUTH_HEADER" -H "Accept: application/octet-stream" "${ASSET_URL}" -o "${TEMP_DIR}/alfred.tar.gz"
+    # Fall back to API method if direct download failed
+    if [ "$DOWNLOAD_SUCCESS" = false ]; then
+        local RELEASE_JSON
+        if [ -n "$AUTH_HEADER" ]; then
+            RELEASE_JSON=$(curl -s -H "$AUTH_HEADER" "${GITHUB_API}/releases/tags/v${ALFRED_VERSION}")
         else
+            RELEASE_JSON=$(curl -s "${GITHUB_API}/releases/tags/v${ALFRED_VERSION}")
+        fi
+
+        local ASSET_URL
+        ASSET_URL=$(echo "$RELEASE_JSON" | grep -o "\"browser_download_url\": \"[^\"]*${ARCHIVE_NAME}\"" | cut -d '"' -f 4)
+
+        if [ -z "$ASSET_URL" ]; then
             log_error "Could not find download URL for ${ARCHIVE_NAME}"
             rm -rf "${TEMP_DIR}"
             exit 1
         fi
-    else
-        log_info "Downloading ${ASSET_URL}..."
+
         if [ -n "$AUTH_HEADER" ]; then
             curl -fsSL -H "$AUTH_HEADER" "${ASSET_URL}" -o "${TEMP_DIR}/alfred.tar.gz"
         else
@@ -118,7 +126,7 @@ download_release() {
     fi
 
     # Verify checksum
-    local CHECKSUM_URL="${ASSET_URL}.sha256"
+    local CHECKSUM_URL="${ARCHIVE_URL}.sha256"
     if [ -n "$AUTH_HEADER" ]; then
         curl -fsSL -H "$AUTH_HEADER" "${CHECKSUM_URL}" -o "${TEMP_DIR}/alfred.tar.gz.sha256" 2>/dev/null || true
     else

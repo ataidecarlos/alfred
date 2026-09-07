@@ -30,17 +30,15 @@ CONFIG_DIR="${HOME}/.config/alfred"
 DATA_DIR="${HOME}/.local/share/alfred"
 CACHE_DIR="${HOME}/.cache/alfred"
 
-# Authentication
+# Authentication (optional, for private repos)
+AUTH_HEADER=""
 if [ -n "$GH_PAT" ]; then
     AUTH_HEADER="Authorization: token $GH_PAT"
-else
-    AUTH_HEADER=""
 fi
 
 # Get current installed version
 get_installed_version() {
     if [ -f "${INSTALL_DIR}/alfred" ]; then
-        # Try to get version from binary
         INSTALLED_VERSION=$("${INSTALL_DIR}/alfred" --version 2>/dev/null | grep -oE '[0-9]{8}' | head -1)
         if [ -n "${INSTALLED_VERSION}" ]; then
             echo "${INSTALLED_VERSION}"
@@ -69,36 +67,47 @@ install_update() {
     local VERSION=$1
     local PLATFORM=$2
     local ARCHIVE_NAME="alfred-v${VERSION}-${PLATFORM}.tar.gz"
+    local ARCHIVE_URL="https://github.com/${GITHUB_REPO}/releases/download/v${VERSION}/${ARCHIVE_NAME}"
     local TEMP_DIR=$(mktemp -d)
-
-    # Get release assets via API
-    local RELEASE_JSON
-    if [ -n "$AUTH_HEADER" ]; then
-        RELEASE_JSON=$(curl -s -H "$AUTH_HEADER" "${GITHUB_API}/releases/tags/v${VERSION}")
-    else
-        RELEASE_JSON=$(curl -s "${GITHUB_API}/releases/tags/v${VERSION}")
-    fi
-
-    # Find the asset URL
-    local ASSET_URL
-    ASSET_URL=$(echo "$RELEASE_JSON" | grep -o "\"browser_download_url\": \"[^\"]*${ARCHIVE_NAME}\"" | cut -d '"' -f 4)
-
-    if [ -z "$ASSET_URL" ]; then
-        log_error "Could not find download URL for ${ARCHIVE_NAME}"
-        rm -rf "${TEMP_DIR}"
-        exit 1
-    fi
 
     log_info "Downloading ${ARCHIVE_NAME}..."
 
-    if [ -n "$AUTH_HEADER" ]; then
-        curl -fsSL -H "$AUTH_HEADER" "${ASSET_URL}" -o "${TEMP_DIR}/alfred.tar.gz"
+    # Try direct download first (works for public repos)
+    local DOWNLOAD_SUCCESS=false
+
+    if curl -fsSL "${ARCHIVE_URL}" -o "${TEMP_DIR}/alfred.tar.gz" 2>/dev/null; then
+        DOWNLOAD_SUCCESS=true
     else
-        curl -fsSL "${ASSET_URL}" -o "${TEMP_DIR}/alfred.tar.gz"
+        log_warn "Direct download failed, trying API method..."
+    fi
+
+    # Fall back to API method if direct download failed
+    if [ "$DOWNLOAD_SUCCESS" = false ]; then
+        local RELEASE_JSON
+        if [ -n "$AUTH_HEADER" ]; then
+            RELEASE_JSON=$(curl -s -H "$AUTH_HEADER" "${GITHUB_API}/releases/tags/v${VERSION}")
+        else
+            RELEASE_JSON=$(curl -s "${GITHUB_API}/releases/tags/v${VERSION}")
+        fi
+
+        local ASSET_URL
+        ASSET_URL=$(echo "$RELEASE_JSON" | grep -o "\"browser_download_url\": \"[^\"]*${ARCHIVE_NAME}\"" | cut -d '"' -f 4)
+
+        if [ -z "$ASSET_URL" ]; then
+            log_error "Could not find download URL for ${ARCHIVE_NAME}"
+            rm -rf "${TEMP_DIR}"
+            exit 1
+        fi
+
+        if [ -n "$AUTH_HEADER" ]; then
+            curl -fsSL -H "$AUTH_HEADER" "${ASSET_URL}" -o "${TEMP_DIR}/alfred.tar.gz"
+        else
+            curl -fsSL "${ASSET_URL}" -o "${TEMP_DIR}/alfred.tar.gz"
+        fi
     fi
 
     # Verify checksum
-    local CHECKSUM_URL="${ASSET_URL}.sha256"
+    local CHECKSUM_URL="${ARCHIVE_URL}.sha256"
     if [ -n "$AUTH_HEADER" ]; then
         curl -fsSL -H "$AUTH_HEADER" "${CHECKSUM_URL}" -o "${TEMP_DIR}/alfred.tar.gz.sha256" 2>/dev/null || true
     else

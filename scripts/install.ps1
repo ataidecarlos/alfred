@@ -6,9 +6,12 @@
     Downloads and installs Alfred AI agent server
 .PARAMETER Version
     Version to install (default: latest)
+.PARAMETER Token
+    GitHub personal access token for private repos (optional)
 .EXAMPLE
     .\install.ps1
     .\install.ps1 -Version 20260904
+    .\install.ps1 -Token ghp_xxxxx
 #>
 
 param(
@@ -58,9 +61,14 @@ function Get-Platform {
 # Get latest version from GitHub
 function Get-LatestVersion {
     if ($Version -eq "latest") {
-        $headers = Get-GitHubHeaders
-        $release = Invoke-RestMethod -Uri "$GitHubApi/releases/latest" -Headers $headers
-        $Version = $release.tag_name -replace '^v', ''
+        try {
+            $headers = Get-GitHubHeaders
+            $release = Invoke-RestMethod -Uri "$GitHubApi/releases/latest" -Headers $headers
+            $Version = $release.tag_name -replace '^v', ''
+        } catch {
+            Write-Error "Failed to get latest version: $_"
+            exit 1
+        }
     }
     Write-Info "Version: $Version"
     return $Version
@@ -71,51 +79,74 @@ function Get-Release {
     param([string]$Version, [string]$Platform)
 
     $archiveName = "alfred-v$Version-$Platform.zip"
-    $downloadUrl = "https://github.com/$GitHubRepo/releases/download/v$Version/$archiveName"
-    $checksumUrl = "$downloadUrl.sha256"
+    $archiveUrl = "https://github.com/$GitHubRepo/releases/download/v$Version/$archiveName"
+    $checksumUrl = "$archiveUrl.sha256"
 
     $tempDir = Join-Path $env:TEMP "alfred-install-$(Get-Random)"
     New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
 
-    Write-Info "Downloading $archiveName..."
-
-    # Get release assets via API (required for private repos)
-    $headers = Get-GitHubHeaders
-    $release = Invoke-RestMethod -Uri "$GitHubApi/releases/tags/v$Version" -Headers $headers
-    $asset = $release.assets | Where-Object { $_.name -eq $archiveName }
-    
-    if (-not $asset) {
-        Write-Error "Asset $archiveName not found in release v$Version"
-        exit 1
-    }
-
-    # Download archive using API URL with authentication
     $archivePath = Join-Path $tempDir $archiveName
-    $downloadHeaders = @{"Accept" = "application/octet-stream"}
-    if ($Token) {
-        $downloadHeaders["Authorization"] = "token $Token"
-    } elseif ($env:GH_PAT) {
-        $downloadHeaders["Authorization"] = "token $env:GH_PAT"
+
+    # Try direct download first (works for public repos)
+    Write-Info "Downloading $archiveName..."
+    $downloadSuccess = $false
+
+    try {
+        Invoke-WebRequest -Uri $archiveUrl -OutFile $archivePath -ErrorAction Stop
+        $downloadSuccess = $true
+    } catch {
+        Write-Warn "Direct download failed, trying API method..."
     }
-    Invoke-WebRequest -Uri $asset.url -OutFile $archivePath -Headers $downloadHeaders
+
+    # Fall back to API method if direct download failed
+    if (-not $downloadSuccess) {
+        try {
+            $headers = Get-GitHubHeaders
+            $release = Invoke-RestMethod -Uri "$GitHubApi/releases/tags/v$Version" -Headers $headers
+            $asset = $release.assets | Where-Object { $_.name -eq $archiveName }
+
+            if (-not $asset) {
+                Write-Error "Asset $archiveName not found in release v$Version"
+                exit 1
+            }
+
+            $downloadHeaders = @{"Accept" = "application/octet-stream"}
+            if ($Token) {
+                $downloadHeaders["Authorization"] = "token $Token"
+            } elseif ($env:GH_PAT) {
+                $downloadHeaders["Authorization"] = "token $env:GH_PAT"
+            }
+
+            Invoke-WebRequest -Uri $asset.url -OutFile $archivePath -Headers $downloadHeaders
+        } catch {
+            Write-Error "Failed to download: $_"
+            Remove-Item -Path $tempDir -Recurse -Force
+            exit 1
+        }
+    }
 
     # Download and verify checksum
-    $checksumAsset = $release.assets | Where-Object { $_.name -eq "$archiveName.sha256" }
     $checksumPath = "$archivePath.sha256"
-    if ($checksumAsset) {
-        Invoke-WebRequest -Uri $checksumAsset.url -OutFile $checksumPath -Headers $downloadHeaders
+    $checksumSuccess = $false
+
+    try {
+        Invoke-WebRequest -Uri $checksumUrl -OutFile $checksumPath -ErrorAction Stop
+        $checksumSuccess = $true
+    } catch {
+        Write-Warn "Checksum download failed, skipping verification"
     }
 
-    $expectedHash = (Get-Content $checksumPath -Raw).Split(' ')[0].Trim()
-    $actualHash = (Get-FileHash -Path $archivePath -Algorithm SHA256).Hash.ToLower()
+    if ($checksumSuccess -and (Test-Path $checksumPath)) {
+        $expectedHash = (Get-Content $checksumPath -Raw).Split(' ')[0].Trim()
+        $actualHash = (Get-FileHash -Path $archivePath -Algorithm SHA256).Hash.ToLower()
 
-    if ($expectedHash -ne $actualHash) {
-        Write-Error "Checksum verification failed!"
-        Remove-Item -Path $tempDir -Recurse -Force
-        exit 1
+        if ($expectedHash -ne $actualHash) {
+            Write-Error "Checksum verification failed!"
+            Remove-Item -Path $tempDir -Recurse -Force
+            exit 1
+        }
+        Write-Info "Checksum verified"
     }
-
-    Write-Info "Checksum verified"
 
     # Extract archive
     Write-Info "Extracting..."
