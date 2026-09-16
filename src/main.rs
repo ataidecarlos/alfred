@@ -49,6 +49,18 @@ struct Cli {
     /// Dump a test screen to file and exit (for TUI testing)
     #[arg(long)]
     dump: bool,
+    /// Dump the command palette to file and exit (for TUI testing)
+    #[arg(long)]
+    dump_palette: bool,
+    /// Filter to apply in --dump-palette (e.g. "/theme")
+    #[arg(long)]
+    palette_filter: Option<String>,
+    /// Move palette selection down N times in --dump-palette
+    #[arg(long, default_value_t = 0)]
+    palette_select: usize,
+    /// Theme to use for dumps: dark or light
+    #[arg(long)]
+    dump_theme: Option<String>,
 }
 
 fn ensure_directories() {
@@ -144,8 +156,20 @@ async fn main() {
 
     let cli = Cli::parse();
 
-    if cli.dump {
-        run_dump_mode(&cli.config).await;
+    if cli.dump_palette {
+        run_dump_mode(
+            &cli.config,
+            cli.dump_theme.as_deref(),
+            true,
+            cli.palette_filter.as_deref(),
+            cli.palette_select,
+        )
+        .await;
+        return;
+    }
+
+    if cli.dump || (cli.dump_theme.is_some() && !cli.dump_palette) {
+        run_dump_mode(&cli.config, cli.dump_theme.as_deref(), false, None, 0).await;
         return;
     }
 
@@ -299,7 +323,13 @@ async fn initialize_state(config: &config::AppConfig) -> Result<AppState, Box<dy
     })
 }
 
-async fn run_dump_mode(config_path: &Option<String>) {
+async fn run_dump_mode(
+    config_path: &Option<String>,
+    theme_name: Option<&str>,
+    with_palette: bool,
+    palette_filter: Option<&str>,
+    palette_select: usize,
+) {
     info!("Alfred dump mode...");
 
     let config_path_str = resolve_config_path(config_path.as_deref());
@@ -320,8 +350,18 @@ async fn run_dump_mode(config_path: &Option<String>) {
         }
     };
 
-    let theme = tui::theme::Theme::load("dark")
-        .unwrap_or_else(|_| tui::theme::Theme::default_dark());
+    let theme_name = theme_name.unwrap_or("dark");
+    let theme = tui::theme::Theme::load(theme_name).unwrap_or_else(|_| {
+        if theme_name == "light" {
+            tui::theme::Theme::default_light()
+        } else {
+            tui::theme::Theme::default_dark()
+        }
+    });
+
+    let server_url = format!("http://localhost:{}", config.server.port);
+    let mut app = tui::TuiApp::new(server_url);
+    app.set_theme(theme);
 
     // Run a real 2-exchange conversation through the agent loop
     let samples = [
@@ -329,9 +369,6 @@ async fn run_dump_mode(config_path: &Option<String>) {
         "What is 2+2?",
     ];
     let mut history: Vec<types::Message> = Vec::new();
-    let mut chat: Vec<tui::ChatMessage> = vec![tui::ChatMessage::System {
-        text: "Welcome to Alfred! Type a message to start. Press Ctrl+P for commands.".into(),
-    }];
 
     for sample in &samples {
         let now = chrono::Utc::now();
@@ -339,7 +376,7 @@ async fn run_dump_mode(config_path: &Option<String>) {
             content: vec![types::Content::Text(types::TextContent { text: sample.to_string() })],
             timestamp: now,
         }));
-        chat.push(tui::ChatMessage::User {
+        app.push_message(tui::ChatMessage::User {
             text: sample.to_string(),
             timestamp: now.format("%H:%M").to_string(),
         });
@@ -361,53 +398,26 @@ async fn run_dump_mode(config_path: &Option<String>) {
             if !text.is_empty() { Some(text) } else { None }
         }).unwrap_or_else(|| "No response generated.".into());
 
-        chat.push(tui::ChatMessage::Agent {
+        app.push_message(tui::ChatMessage::Agent {
             text: reply,
             timestamp: chrono::Utc::now().format("%H:%M").to_string(),
         });
     }
 
-    // Render through the REAL TUI rendering path
-    let width: u16 = 100;
-    let mut all_lines = Vec::new();
-    for msg in &chat {
-        all_lines.extend(tui::render_message(msg, &theme, width));
+    if with_palette {
+        app.open_palette(palette_filter.unwrap_or(""), palette_select);
     }
-    all_lines.push(ratatui::text::Line::from("  Type a message... (Ctrl+P for commands)"));
 
-    let dump_dir = if cfg!(target_os = "windows") {
-        std::env::var("APPDATA")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|_| std::path::PathBuf::from("."))
-            .join("alfred")
-    } else {
-        std::env::var("HOME")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|_| std::path::PathBuf::from("."))
-            .join(".config/alfred")
-    }.join("debug");
-
-    std::fs::create_dir_all(&dump_dir).expect("Failed to create debug directory");
-
-    let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
-    let filepath = dump_dir.join(format!("screen_dump_{}.txt", timestamp));
-
-    let mut screen_lines = Vec::new();
-    for line in all_lines.iter() {
-        let mut text = String::new();
-        for span in line.iter() {
-            text.push_str(&span.content);
+    // Render through the REAL TUI rendering path (headless backend)
+    let content = tui::render_to_text(&mut app, 100, 40);
+    let prefix = if with_palette { "screen_dump_palette" } else { "screen_dump" };
+    match tui::write_dump(prefix, &content) {
+        Ok(path) => println!("Screen dump saved to: {}", path.display()),
+        Err(e) => {
+            error!("Failed to write dump file: {}", e);
+            std::process::exit(1);
         }
-        screen_lines.push(text.trim_end().to_string());
     }
-    while screen_lines.last().map_or(false, |l| l.trim().is_empty()) {
-        screen_lines.pop();
-    }
-
-    let content = screen_lines.join("\n");
-    std::fs::write(&filepath, content).expect("Failed to write dump file");
-
-    println!("Screen dump saved to: {}", filepath.display());
 }
 
 async fn run_tui_mode(config_path: &Option<String>) {

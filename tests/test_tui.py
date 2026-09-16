@@ -38,9 +38,13 @@ def send_message(text):
                       timeout=30)
     return r.json().get("reply", "")
 
-def trigger_dump():
-    subprocess.run([ALFRED, "--dump"], capture_output=True, timeout=10)
-    time.sleep(2)
+def run_dump(*args):
+    """Run alfred with dump flags, return the latest dump content."""
+    if not args:
+        args = ("--dump",)
+    subprocess.run([ALFRED] + list(args), capture_output=True, timeout=180)
+    time.sleep(1)
+    return latest_dump("screen_dump")
 
 def read_dump():
     dumps = sorted(glob.glob(os.path.join(DUMP_DIR, "*.txt")), reverse=True)
@@ -49,73 +53,75 @@ def read_dump():
     with open(dumps[0]) as f:
         return f.read()
 
+def latest_dump(prefix):
+    dumps = sorted(glob.glob(os.path.join(DUMP_DIR, f"{prefix}_*.txt")), reverse=True)
+    if not dumps:
+        return None
+    with open(dumps[0]) as f:
+        return f.read()
+
+def check(name, results, condition, desc):
+    results.append((condition, desc))
+    print(f"  {'✓' if condition else '✗'} [{name}] {desc}")
+    return condition
+
 def test_tui():
     print("=== Alfred TUI Test ===\n")
+    results = []
 
     cleanup()
     print("1. Cleaned previous dumps")
 
-    print("2. Starting Alfred server...")
-    start_server()
+    # --- Chat dump (live LLM conversation through real render path) ---
+    print("2. Chat dump (--dump)...")
+    dump = run_dump()
+    check("chat", results, dump is not None, "dump file created")
+    if dump:
+        print(dump)
+        check("chat", results, "Hello there!" in dump, "user message found")
+        check("chat", results, "Alfred" in dump, "agent name found")
+        check("chat", results, "▌" in dump, "accent bar found")
+        check("chat", results, "You (" in dump, "user label found")
+        check("chat", results, "Type a message" in dump, "input area found")
 
-    try:
-        r = requests.get(f"{SERVER_URL}/health", timeout=5)
-        if r.status_code != 200:
-            print(f"   Server error: {r.status_code}")
-            return False
-        print("   Server running... OK")
-    except Exception as e:
-        print(f"   Server not running: {e}")
-        return False
+    # --- Palette dump, scrolled to last item ---
+    print("3. Palette dump (--dump-palette --palette-select 8)...")
+    cleanup()
+    palette = run_dump("--dump-palette", "--palette-select", "8")
+    check("palette", results, palette is not None, "palette dump created")
+    if palette:
+        print(palette)
+        check("palette", results, "Command Palette" in palette, "panel title found")
+        # select=8 scrolls the list: /clear drops out, marker lands on /quit.
+        for cmd in ["/help", "/todos", "/memories", "/dump",
+                    "/theme-dark", "/theme-light", "/config", "/quit"]:
+            check("palette", results, cmd in palette, f"{cmd} listed")
+        check("palette", results, "/clear" not in palette, "/clear scrolled out (scroll works)")
+        check("palette", results, ">/quit" in palette, "selection marker on /quit")
+        check("palette", results, "Enter Select" in palette, "footer found")
 
-    print("3. Sending messages...")
-    messages = [
-        "Hello there! What is your name?",
-        "What is 2+2?",
-        "Tell me a short joke",
-    ]
+    # --- Filtered palette dump ---
+    print("4. Filtered palette (--palette-filter /theme)...")
+    cleanup()
+    filtered = run_dump("--dump-palette", "--palette-filter", "/theme")
+    check("filter", results, filtered is not None, "filtered dump created")
+    if filtered:
+        print(filtered)
+        check("filter", results, "/theme-dark" in filtered, "/theme-dark shown")
+        check("filter", results, "/theme-light" in filtered, "/theme-light shown")
+        check("filter", results, "/quit" not in filtered, "/quit filtered out")
 
-    for i, msg in enumerate(messages, 1):
-        print(f"   [{i}/3] {msg}")
-        reply = send_message(msg)
-        print(f"   Reply: {reply[:80]}...")
-        time.sleep(2)
+    # --- Light theme dump ---
+    print("5. Light theme dump (--dump --dump-theme light)...")
+    cleanup()
+    light = run_dump("--dump-theme", "light")
+    check("light", results, light is not None, "light dump created")
+    if light:
+        check("light", results, "Alfred" in light, "content rendered")
 
-    print("4. Triggering screen dump...")
-    trigger_dump()
-
-    print("5. Reading screen dump...")
-    dump = read_dump()
-
-    if not dump:
-        print("   ERROR: No dump file found")
-        return False
-
-    print("\n" + "=" * 60)
-    print("SCREEN DUMP:")
-    print("=" * 60)
-    print(dump)
-    print("=" * 60)
-
-    checks = [
-        ("Hello there!" in dump, "User message found"),
-        ("Alfred" in dump, "Agent name found"),
-        ("▌" in dump, "Accent bar found"),
-        ("You (" in dump, "User label found"),
-        ("Type a message" in dump, "Input area found"),
-    ]
-
-    print("\n=== Checks ===")
-    passed = sum(1 for ok, _ in checks if ok)
-    total = len(checks)
-
-    for ok, desc in checks:
-        status = "✓" if ok else "✗"
-        print(f"  {status} {desc}")
-
+    passed = sum(1 for ok, _ in results if ok)
+    total = len(results)
     print(f"\n{passed}/{total} checks passed")
-
-    stop_server()
     return passed == total
 
 if __name__ == "__main__":

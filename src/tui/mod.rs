@@ -392,36 +392,64 @@ impl TuiApp {
         }
     }
 
-    fn get_all_lines(&self, width: u16) -> Vec<Line<'static>> {
-        let mut all_lines = Vec::new();
-        for msg in &self.messages {
-            all_lines.extend(render_message(msg, &self.theme, width));
+    /// Append a chat message (used by dump tooling and tests).
+    pub fn push_message(&mut self, msg: ChatMessage) {
+        self.messages.push(msg);
+    }
+
+    /// Replace the active theme (used by dump tooling).
+    pub fn set_theme(&mut self, theme: Theme) {
+        self.theme = theme;
+    }
+
+    /// Open the palette with a filter applied and move selection down
+    /// `select` times (used by dump tooling to exercise scroll).
+    pub fn open_palette(&mut self, filter: &str, select: usize) {
+        self.command_palette.visible = true;
+        self.command_palette.filter = filter.to_string();
+        self.command_palette.update_filter();
+        for _ in 0..select {
+            self.command_palette.move_down();
         }
-        all_lines
     }
 }
 
 // ── Message Bubble Rendering ────────────────────────────────────────
 
+/// Byte index of the largest char boundary <= `max`, so slicing never
+/// panics on multi-byte UTF-8 (LLM replies contain emoji).
+fn floor_char_boundary(s: &str, max: usize) -> usize {
+    let mut end = max.min(s.len());
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    end
+}
+
 fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
+    let max_width = max_width.max(1);
     let mut lines = Vec::new();
     for paragraph in text.split('\n') {
         if paragraph.is_empty() {
             lines.push(String::new());
-        } else if paragraph.len() <= max_width {
+        } else if paragraph.chars().count() <= max_width {
             lines.push(paragraph.to_string());
         } else {
             let mut remaining = paragraph;
             while !remaining.is_empty() {
-                if remaining.len() <= max_width {
+                if remaining.chars().count() <= max_width {
                     lines.push(remaining.to_string());
                     break;
                 }
-                let cut = remaining[..max_width].rfind(' ').unwrap_or(max_width);
+                let end = floor_char_boundary(remaining, max_width);
+                let chunk = &remaining[..end];
+                // Prefer breaking at the last space inside the chunk.
+                let cut = chunk.rfind(' ').unwrap_or(0);
                 if cut == 0 {
-                    lines.push(remaining[..max_width].to_string());
-                    remaining = &remaining[max_width..];
+                    lines.push(chunk.to_string());
+                    remaining = &remaining[end..];
                 } else {
+                    // `cut` is a byte index into ASCII space, always a boundary.
                     lines.push(remaining[..cut].to_string());
                     remaining = remaining[cut..].trim_start();
                 }
@@ -431,7 +459,7 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
     lines
 }
 
-pub fn bubble_row(accent: Color, bg: Color, content: &str, content_width: usize) -> Line<'static> {
+fn bubble_row(accent: Color, bg: Color, content: &str, content_width: usize) -> Line<'static> {
     let used: usize = content.chars().count();
     let pad = content_width.saturating_sub(used);
     Line::from(vec![
@@ -440,58 +468,40 @@ pub fn bubble_row(accent: Color, bg: Color, content: &str, content_width: usize)
     ])
 }
 
-pub fn render_message(msg: &ChatMessage, theme: &Theme, terminal_width: u16) -> Vec<Line<'static>> {
-    // Full-width rows: 1 accent column + content, all left aligned.
+fn render_bubble(accent: Color, label: &str, text: &str, theme: &Theme, terminal_width: u16) -> Vec<Line<'static>> {
+    // Full-width rows: 1 accent column + content, left aligned, with
+    // one blank padded row before and after the text.
     let content_width = (terminal_width as usize).saturating_sub(1);
     let text_width = content_width.saturating_sub(4);
+    let wrapped = wrap_text(text, text_width);
+    let mut lines = Vec::new();
+    lines.push(bubble_row(accent, theme.message_bg, "", content_width));
+    let label_line = Line::from(vec![
+        Span::styled("▌", Style::default().fg(accent).bg(theme.message_bg)),
+        Span::styled(format!(" {}", label), Style::default().fg(accent).add_modifier(Modifier::BOLD).bg(theme.message_bg)),
+        Span::styled(" ".repeat(content_width.saturating_sub(label.chars().count() + 1)), Style::default().bg(theme.message_bg)),
+    ]);
+    lines.push(label_line);
+    for line in wrapped.iter() {
+        let padded = format!("  {}", line);
+        let pad = content_width.saturating_sub(padded.chars().count());
+        lines.push(Line::from(vec![
+            Span::styled("▌", Style::default().fg(accent).bg(theme.message_bg)),
+            Span::styled(format!("{}{}", padded, " ".repeat(pad)), Style::default().fg(theme.text).bg(theme.message_bg)),
+        ]));
+    }
+    lines.push(bubble_row(accent, theme.message_bg, "", content_width));
+    lines.push(Line::from(""));
+    lines
+}
 
+pub fn render_message(msg: &ChatMessage, theme: &Theme, terminal_width: u16) -> Vec<Line<'static>> {
     match msg {
         ChatMessage::User { text, timestamp } => {
-            let wrapped = wrap_text(text, text_width);
-            let label = format!("You ({})", timestamp);
-            let mut lines = Vec::new();
-            lines.push(bubble_row(theme.user_accent, theme.message_bg, "", content_width));
-            let bg_style = Style::default().bg(theme.message_bg);
-            let label_line = Line::from(vec![
-                Span::styled("▌", Style::default().fg(theme.user_accent).bg(theme.message_bg)),
-                Span::styled(format!(" {}", label), Style::default().fg(theme.user_accent).add_modifier(Modifier::BOLD).bg(theme.message_bg)),
-                Span::styled(" ".repeat(content_width.saturating_sub(label.len() + 1)), bg_style),
-            ]);
-            lines.push(label_line);
-            for line in wrapped.iter() {
-                let padded = format!("  {}", line);
-                let pad = content_width.saturating_sub(padded.chars().count());
-                lines.push(Line::from(vec![
-                    Span::styled("▌", Style::default().fg(theme.user_accent).bg(theme.message_bg)),
-                    Span::styled(format!("{}{}", padded, " ".repeat(pad)), Style::default().fg(theme.text).bg(theme.message_bg)),
-                ]));
-            }
-            lines.push(bubble_row(theme.user_accent, theme.message_bg, "", content_width));
-            lines.push(Line::from(""));
-            lines
+            render_bubble(theme.user_accent, &format!("You ({})", timestamp), text, theme, terminal_width)
         }
         ChatMessage::Agent { text, timestamp } => {
-            let wrapped = wrap_text(text, text_width);
-            let label = format!("Alfred ({})", timestamp);
-            let mut lines = Vec::new();
-            lines.push(bubble_row(theme.agent_accent, theme.message_bg, "", content_width));
-            let label_line = Line::from(vec![
-                Span::styled("▌", Style::default().fg(theme.agent_accent).bg(theme.message_bg)),
-                Span::styled(format!(" {}", label), Style::default().fg(theme.agent_accent).add_modifier(Modifier::BOLD).bg(theme.message_bg)),
-                Span::styled(" ".repeat(content_width.saturating_sub(label.len() + 1)), Style::default().bg(theme.message_bg)),
-            ]);
-            lines.push(label_line);
-            for line in wrapped.iter() {
-                let padded = format!("  {}", line);
-                let pad = content_width.saturating_sub(padded.chars().count());
-                lines.push(Line::from(vec![
-                    Span::styled("▌", Style::default().fg(theme.agent_accent).bg(theme.message_bg)),
-                    Span::styled(format!("{}{}", padded, " ".repeat(pad)), Style::default().fg(theme.text).bg(theme.message_bg)),
-                ]));
-            }
-            lines.push(bubble_row(theme.agent_accent, theme.message_bg, "", content_width));
-            lines.push(Line::from(""));
-            lines
+            render_bubble(theme.agent_accent, &format!("Alfred ({})", timestamp), text, theme, terminal_width)
         }
         ChatMessage::System { text } => {
             let mut lines = Vec::new();
@@ -548,8 +558,9 @@ fn render_command_palette(app: &mut TuiApp, f: &mut ratatui::Frame) {
         } else {
             Style::default().bg(app.theme.menu_bg).fg(app.theme.menu_text)
         };
+        let marker = if is_selected { ">" } else { " " };
         let line = Line::from(vec![
-            Span::styled(format!(" {:<14}", cmd.name), style.add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{}{:<14}", marker, cmd.name), style.add_modifier(Modifier::BOLD)),
             Span::styled(cmd.description.clone(), style),
         ]);
         f.render_widget(Paragraph::new(line).style(style), row);
@@ -567,45 +578,43 @@ fn render_command_palette(app: &mut TuiApp, f: &mut ratatui::Frame) {
 
 // ── Screen Dump ─────────────────────────────────────────────────────
 
-fn dump_screen_to_file(all_lines: &[Line<'_>], width: u16, height: u16) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let dump_dir = dirs().join("debug");
+pub fn debug_dir() -> PathBuf {
+    dirs().join("debug")
+}
+
+pub fn write_dump(prefix: &str, content: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let dump_dir = debug_dir();
     std::fs::create_dir_all(&dump_dir)?;
 
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
-    let filepath = dump_dir.join(format!("screen_dump_{}.txt", timestamp));
-
-    // Build the screen as plain text
-    let mut screen_lines = Vec::new();
-
-    // Chat area
-    for line in all_lines.iter() {
-        let mut text = String::new();
-        for span in line.iter() {
-            text.push_str(&span.content);
-        }
-        // Pad or trim to width
-        if text.len() > width as usize {
-            text.truncate(width as usize);
-        } else {
-            text.extend(std::iter::repeat(' ').take(width as usize - text.len()));
-        }
-        screen_lines.push(text);
-    }
-
-    // Pad remaining height
-    while screen_lines.len() < height as usize {
-        screen_lines.push(" ".repeat(width as usize));
-    }
-
-    // Trim trailing empty lines
-    while screen_lines.last().map_or(false, |l| l.trim().is_empty()) {
-        screen_lines.pop();
-    }
-
-    let content = screen_lines.join("\n");
+    let filepath = dump_dir.join(format!("{}_{}.txt", prefix, timestamp));
     std::fs::write(&filepath, content)?;
 
     Ok(filepath)
+}
+
+/// Render the full TUI screen to plain text (no colors) using a
+/// headless backend. Same code path as the live terminal.
+pub fn render_to_text(app: &mut TuiApp, width: u16, height: u16) -> String {
+    use ratatui::backend::TestBackend;
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).expect("test backend");
+    terminal
+        .draw(|f| render_frame(app, f))
+        .expect("render frame");
+    let buffer = terminal.backend().buffer().clone();
+    let mut lines = Vec::new();
+    for y in 0..height {
+        let mut row = String::new();
+        for x in 0..width {
+            row.push_str(buffer.get(x, y).symbol());
+        }
+        lines.push(row.trim_end().to_string());
+    }
+    while lines.last().map_or(false, |l| l.trim().is_empty()) {
+        lines.pop();
+    }
+    lines.join("\n")
 }
 
 fn dirs() -> PathBuf {
@@ -622,6 +631,82 @@ fn dirs() -> PathBuf {
     }
 }
 
+// ── Shared Frame Renderer (live terminal AND headless dumps) ───────
+
+fn render_frame(app: &mut TuiApp, f: &mut ratatui::Frame) {
+    let chunks = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            Constraint::Min(1),
+            Constraint::Length(3),
+        ])
+        .split(f.area());
+
+    let terminal_width = chunks[0].width;
+
+    // Render chat
+    let mut all_lines = Vec::new();
+    for msg in &app.messages {
+        all_lines.extend(render_message(msg, &app.theme, terminal_width));
+    }
+
+    let chat_height = chunks[0].height as usize;
+    let total_lines = all_lines.len();
+    if total_lines > chat_height {
+        app.scroll_position = app.scroll_position.min(total_lines - chat_height);
+    } else {
+        app.scroll_position = 0;
+    }
+
+    let visible_lines: Vec<Line> = all_lines
+        .into_iter()
+        .skip(app.scroll_position)
+        .take(chat_height)
+        .collect();
+
+    let chat = Paragraph::new(Text::from(visible_lines))
+        .style(Style::default().bg(app.theme.background))
+        .block(Block::default()
+            .borders(Borders::NONE)
+            .style(Style::default().bg(app.theme.background)));
+    f.render_widget(chat, chunks[0]);
+
+    // Input area
+    let input_text = if app.is_loading {
+        "  Alfred is typing...".to_string()
+    } else if app.input.is_empty() {
+        "  Type a message... (Ctrl+P for commands)".to_string()
+    } else {
+        format!("  {}", app.input)
+    };
+
+    let input_style = if app.is_loading {
+        Style::default().fg(app.theme.text_dim).bg(app.theme.background)
+    } else {
+        Style::default().fg(app.theme.text).bg(app.theme.background)
+    };
+
+    let input = Paragraph::new(input_text)
+        .style(input_style)
+        .block(Block::default()
+            .borders(Borders::NONE)
+            .style(Style::default().bg(app.theme.background)));
+    f.render_widget(input, chunks[1]);
+
+    if !app.is_loading && !app.command_palette.visible {
+        // Input block has no borders/title, so text sits on the first row.
+        let cursor_x = chunks[1].x + 2 + app.cursor_position as u16;
+        let cursor_y = chunks[1].y;
+        if cursor_x < chunks[1].x + chunks[1].width {
+            f.set_cursor_position((cursor_x, cursor_y));
+        }
+    }
+
+    if app.command_palette.visible {
+        render_command_palette(&mut *app, f);
+    }
+}
+
 // ── Main Run Function ───────────────────────────────────────────────
 
 pub async fn run(server_url: String) -> Result<(), Box<dyn std::error::Error>> {
@@ -635,79 +720,7 @@ pub async fn run(server_url: String) -> Result<(), Box<dyn std::error::Error>> {
     let tick_rate = Duration::from_millis(100);
 
     loop {
-        terminal.draw(|f| {
-            let chunks = Layout::default()
-                .direction(ratatui::layout::Direction::Vertical)
-                .constraints([
-                    Constraint::Min(1),
-                    Constraint::Length(3),
-                ])
-                .split(f.area());
-
-            let terminal_width = chunks[0].width;
-
-            // Render chat
-            let mut all_lines = Vec::new();
-            for msg in &app.messages {
-                all_lines.extend(render_message(msg, &app.theme, terminal_width));
-            }
-
-            let chat_height = chunks[0].height as usize;
-            let total_lines = all_lines.len();
-            if total_lines > chat_height {
-                app.scroll_position = app.scroll_position.min(total_lines - chat_height);
-            } else {
-                app.scroll_position = 0;
-            }
-
-            let visible_lines: Vec<Line> = all_lines
-                .into_iter()
-                .skip(app.scroll_position)
-                .take(chat_height)
-                .collect();
-
-            let chat = Paragraph::new(Text::from(visible_lines))
-                .style(Style::default().bg(app.theme.background))
-                .block(Block::default()
-                    .borders(Borders::NONE)
-                    .style(Style::default().bg(app.theme.background)));
-            f.render_widget(chat, chunks[0]);
-
-            // Input area
-            let input_text = if app.is_loading {
-                "  Alfred is typing...".to_string()
-            } else if app.input.is_empty() {
-                "  Type a message... (Ctrl+P for commands)".to_string()
-            } else {
-                format!("  {}", app.input)
-            };
-
-            let input_style = if app.is_loading {
-                Style::default().fg(app.theme.text_dim).bg(app.theme.background)
-            } else {
-                Style::default().fg(app.theme.text).bg(app.theme.background)
-            };
-
-            let input = Paragraph::new(input_text)
-                .style(input_style)
-                .block(Block::default()
-                    .borders(Borders::NONE)
-                    .style(Style::default().bg(app.theme.background)));
-            f.render_widget(input, chunks[1]);
-
-            if !app.is_loading && !app.command_palette.visible {
-                // Input block has no borders/title, so text sits on the first row.
-                let cursor_x = chunks[1].x + 2 + app.cursor_position as u16;
-                let cursor_y = chunks[1].y;
-                if cursor_x < chunks[1].x + chunks[1].width {
-                    f.set_cursor_position((cursor_x, cursor_y));
-                }
-            }
-
-            if app.command_palette.visible {
-                render_command_palette(&mut app, f);
-            }
-        })?;
+        terminal.draw(|f| render_frame(&mut app, f))?;
 
         if event::poll(tick_rate)? {
             if let Event::Key(key) = event::read()? {
@@ -717,11 +730,11 @@ pub async fn run(server_url: String) -> Result<(), Box<dyn std::error::Error>> {
 
         app.poll_response();
 
-        // Handle screen dump request AFTER render
-        if let Some(_msg) = app.dump_message.take() {
+        // Handle screen dump request AFTER render (same path as --dump)
+        if app.dump_message.take().is_some() {
             let size = terminal.size()?;
-            let all_lines = app.get_all_lines(size.width);
-            match dump_screen_to_file(&all_lines, size.width, size.height) {
+            let content = render_to_text(&mut app, size.width, size.height);
+            match write_dump("screen_dump", &content) {
                 Ok(path) => {
                     app.messages.push(ChatMessage::System {
                         text: format!("Screen saved to {}", path.display()),
@@ -775,4 +788,111 @@ pub struct ServerInfo {
     pub port: u16,
     pub uptime_secs: u64,
     pub active_connections: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_theme() -> Theme {
+        Theme::default_dark()
+    }
+
+    #[test]
+    fn palette_move_down_clamps_and_scrolls() {
+        let mut p = CommandPalette::new();
+        assert!(p.commands.len() > PALETTE_VISIBLE_ROWS);
+        // Move to the last item (9 commands, index 8)
+        for _ in 0..20 {
+            p.move_down();
+        }
+        assert_eq!(p.selected, p.filtered.len() - 1);
+        // Selection must stay within the visible window
+        assert!(p.selected < p.scroll + PALETTE_VISIBLE_ROWS);
+        assert!(p.scroll > 0);
+    }
+
+    #[test]
+    fn palette_move_up_scrolls_back() {
+        let mut p = CommandPalette::new();
+        for _ in 0..20 {
+            p.move_down();
+        }
+        for _ in 0..20 {
+            p.move_up();
+        }
+        assert_eq!(p.selected, 0);
+        assert_eq!(p.scroll, 0);
+    }
+
+    #[test]
+    fn palette_filter_resets_selection() {
+        let mut p = CommandPalette::new();
+        for _ in 0..5 {
+            p.move_down();
+        }
+        p.filter = "/theme".into();
+        p.update_filter();
+        assert_eq!(p.filtered.len(), 2);
+        assert_eq!(p.selected, 0);
+        assert_eq!(p.scroll, 0);
+    }
+
+    #[test]
+    fn wrap_text_empty_and_short() {
+        assert_eq!(wrap_text("", 10), vec!["".to_string()]);
+        assert_eq!(wrap_text("hi", 10), vec!["hi".to_string()]);
+    }
+
+    #[test]
+    fn wrap_text_breaks_at_spaces() {
+        let lines = wrap_text("hello world foo", 8);
+        assert_eq!(lines, vec!["hello".to_string(), "world".to_string(), "foo".to_string()]);
+    }
+
+    #[test]
+    fn wrap_text_long_unbroken_word() {
+        let lines = wrap_text("abcdefghij", 4);
+        assert_eq!(lines, vec!["abcd".to_string(), "efgh".to_string(), "ij".to_string()]);
+    }
+
+    #[test]
+    fn wrap_text_emoji_boundary_no_panic() {
+        // 👋 is 4 bytes; width 5 would split it with naive byte slicing.
+        let text = "ab👋cd ef";
+        let lines = wrap_text(text, 5);
+        assert!(!lines.is_empty());
+        assert_eq!(lines.concat().replace(' ', ""), text.replace(' ', ""));
+    }
+
+    #[test]
+    fn render_message_shape() {
+        let theme = test_theme();
+        let msg = ChatMessage::User { text: "hi".into(), timestamp: "12:00".into() };
+        let lines = render_message(&msg, &theme, 100);
+        // top pad + label + 1 content + bottom pad + blank separator
+        assert_eq!(lines.len(), 5);
+        let first: String = lines[1].iter().map(|s| s.content.as_ref()).collect();
+        assert!(first.contains("You (12:00)"));
+        assert!(first.starts_with('▌'));
+    }
+
+    #[test]
+    fn render_to_text_includes_messages() {
+        let mut app = TuiApp::new("http://localhost:1".into());
+        app.push_message(ChatMessage::User { text: "hello".into(), timestamp: "12:00".into() });
+        let text = render_to_text(&mut app, 80, 24);
+        assert!(text.contains("hello"));
+        assert!(text.contains("You (12:00)"));
+    }
+
+    #[test]
+    fn render_to_text_with_palette() {
+        let mut app = TuiApp::new("http://localhost:1".into());
+        app.open_palette("", 8);
+        let text = render_to_text(&mut app, 100, 40);
+        assert!(text.contains("Command Palette"));
+        assert!(text.contains("/quit"));
+        assert!(text.contains(">/quit"));
+    }
 }

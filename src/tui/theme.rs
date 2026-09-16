@@ -169,3 +169,32 @@ impl Theme {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_hex_six_digit() {
+        assert_eq!(parse_hex("#4682e6").unwrap(), Color::Rgb(0x46, 0x82, 0xe6));
+        assert_eq!(parse_hex("ffffff").unwrap(), Color::Rgb(255, 255, 255));
+    }
+
+    #[test]
+    fn parse_hex_three_digit() {
+        assert_eq!(parse_hex("#fff").unwrap(), Color::Rgb(255, 255, 255));
+        assert_eq!(parse_hex("#000").unwrap(), Color::Rgb(0, 0, 0));
+    }
+
+    #[test]
+    fn parse_hex_invalid() {
+        assert!(parse_hex("#zzzzz").is_err());
+        assert!(parse_hex("#12345").is_err());
+        assert!(parse_hex("").is_err());
+    }
+
+    #[test]
+    fn load_missing_theme_errors() {
+        assert!(Theme::load("no-such-theme-xyz").is_err());
+    }
+}
