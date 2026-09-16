@@ -105,12 +105,18 @@ impl LlmProvider for OpenAiProvider {
         tracing::debug!("Calling OpenAI-compatible API at: {}/chat/completions", self.base_url);
         tracing::debug!("Request body: {}", serde_json::to_string_pretty(&body).unwrap_or_default());
 
-        let resp = self.client.post(format!("{}/chat/completions", self.base_url))
+        let mut request_builder = self.client.post(format!("{}/chat/completions", self.base_url))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await?;
+            .header("User-Agent", "alfred-agent/0.1");
+
+        // OpenCode Go requires x-opencode-session header for routing
+        if self.base_url.contains("opencode.ai") {
+            let session_id = uuid::Uuid::new_v4().to_string();
+            request_builder = request_builder.header("x-opencode-session", session_id);
+        }
+
+        let resp = request_builder.json(&body).send().await?;
 
         tracing::debug!("Response status: {}", resp.status());
 

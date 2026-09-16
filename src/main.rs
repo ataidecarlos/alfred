@@ -46,6 +46,9 @@ struct Cli {
     /// Launch the chat TUI (connects to running server)
     #[arg(long)]
     tui: bool,
+    /// Dump a test screen to file and exit (for TUI testing)
+    #[arg(long)]
+    dump: bool,
 }
 
 fn ensure_directories() {
@@ -137,8 +140,14 @@ async fn main() {
 
     ensure_directories();
     auto_generate_config_files();
+    tui::theme::ensure_default_themes();
 
     let cli = Cli::parse();
+
+    if cli.dump {
+        run_dump_mode(&cli.config).await;
+        return;
+    }
 
     if cli.tui {
         run_tui_mode(&cli.config).await;
@@ -288,6 +297,69 @@ async fn initialize_state(config: &config::AppConfig) -> Result<AppState, Box<dy
         api_key: None,
         vault_path,
     })
+}
+
+async fn run_dump_mode(config_path: &Option<String>) {
+    info!("Alfred dump mode...");
+
+    let config_path_str = resolve_config_path(config_path.as_deref());
+    let config = match load_config(std::path::Path::new(&config_path_str)) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Failed to load config: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let server_url = format!("http://localhost:{}", config.server.port);
+
+    // Check if server is running
+    if !tui::check_server(&server_url).await {
+        println!("Server not running at {}. Cannot dump.", server_url);
+        std::process::exit(1);
+    }
+
+    // Create a test screen dump
+    let dump_dir = if cfg!(target_os = "windows") {
+        std::env::var("APPDATA")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .join("alfred")
+    } else {
+        std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .join(".config/alfred")
+    }.join("debug");
+
+    std::fs::create_dir_all(&dump_dir).expect("Failed to create debug directory");
+
+    let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+    let filepath = dump_dir.join(format!("screen_dump_{}.txt", timestamp));
+
+    // Create a test screen (bubble-less style: bg + left accent)
+    let screen = vec![
+        "",
+        "  Welcome to Alfred! Type a message to start. Press Ctrl+P for commands.",
+        "",
+        "▌",
+        "▌ You (21:32)",
+        "▌   Hello there! What is your name?",
+        "▌",
+        "",
+        "▌",
+        "▌ Alfred (21:32)",
+        "▌   Hello! I'm Alfred, your AI assistant.",
+        "▌   I can help you manage tasks, store memories, and more.",
+        "▌",
+        "",
+        "  Type a message... (Ctrl+P for commands)",
+    ];
+
+    let content = screen.join("\n");
+    std::fs::write(&filepath, content).expect("Failed to write dump file");
+
+    println!("Screen dump saved to: {}", filepath.display());
 }
 
 async fn run_tui_mode(config_path: &Option<String>) {

@@ -1,0 +1,10 @@
+[colors]
+background = "#000000"
+message_bg = "#1a1a1a"
+user_accent = "#4682e6"
+agent_accent = "#e63946"
+text = "#ffffff"
+text_dim = "#888888"
+menu_bg = "#1a1a1a"
+menu_selected = "#333333"
+menu_text = "#ffffff"

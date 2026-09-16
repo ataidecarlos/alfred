@@ -40,3 +40,8 @@ local_vars.txt
 
 # Test API keys (contains secrets)
 test_api_keys.toml
+
+# Python test environment
+tests/venv/
+tests/.pytest_cache/
+tests/__pycache__/
