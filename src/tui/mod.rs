@@ -431,7 +431,7 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
     lines
 }
 
-fn bubble_row(accent: Color, bg: Color, content: &str, content_width: usize) -> Line<'static> {
+pub fn bubble_row(accent: Color, bg: Color, content: &str, content_width: usize) -> Line<'static> {
     let used: usize = content.chars().count();
     let pad = content_width.saturating_sub(used);
     Line::from(vec![
@@ -440,7 +440,7 @@ fn bubble_row(accent: Color, bg: Color, content: &str, content_width: usize) -> 
     ])
 }
 
-fn render_message(msg: &ChatMessage, theme: &Theme, terminal_width: u16) -> Vec<Line<'static>> {
+pub fn render_message(msg: &ChatMessage, theme: &Theme, terminal_width: u16) -> Vec<Line<'static>> {
     // Full-width rows: 1 accent column + content, all left aligned.
     let content_width = (terminal_width as usize).saturating_sub(1);
     let text_width = content_width.saturating_sub(4);

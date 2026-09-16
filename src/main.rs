@@ -311,15 +311,70 @@ async fn run_dump_mode(config_path: &Option<String>) {
         }
     };
 
-    let server_url = format!("http://localhost:{}", config.server.port);
+    // Initialize full state (store, provider, tools, prompts, vault)
+    let state = match initialize_state(&config).await {
+        Ok(s) => s,
+        Err(e) => {
+            error!("Failed to initialize: {}", e);
+            std::process::exit(1);
+        }
+    };
 
-    // Check if server is running
-    if !tui::check_server(&server_url).await {
-        println!("Server not running at {}. Cannot dump.", server_url);
-        std::process::exit(1);
+    let theme = tui::theme::Theme::load("dark")
+        .unwrap_or_else(|_| tui::theme::Theme::default_dark());
+
+    // Run a real 2-exchange conversation through the agent loop
+    let samples = [
+        "Hello there! What is your name?",
+        "What is 2+2?",
+    ];
+    let mut history: Vec<types::Message> = Vec::new();
+    let mut chat: Vec<tui::ChatMessage> = vec![tui::ChatMessage::System {
+        text: "Welcome to Alfred! Type a message to start. Press Ctrl+P for commands.".into(),
+    }];
+
+    for sample in &samples {
+        let now = chrono::Utc::now();
+        history.push(types::Message::User(types::UserMessage {
+            content: vec![types::Content::Text(types::TextContent { text: sample.to_string() })],
+            timestamp: now,
+        }));
+        chat.push(tui::ChatMessage::User {
+            text: sample.to_string(),
+            timestamp: now.format("%H:%M").to_string(),
+        });
+
+        let mut ctx = agent::AgentLoopContext {
+            system_prompt: state.system_prompt.clone(),
+            messages: history.clone(),
+            provider: state.provider.clone(),
+            model: state.model.clone(),
+            tools: state.tools.clone(),
+            event_tx: state.event_tx.clone(),
+            max_turns: 10,
+        };
+        agent::run_agent_loop(&mut ctx).await;
+        history = ctx.messages.clone();
+
+        let reply = history.iter().rev().find_map(|m| {
+            let text = types::extract_text(m);
+            if !text.is_empty() { Some(text) } else { None }
+        }).unwrap_or_else(|| "No response generated.".into());
+
+        chat.push(tui::ChatMessage::Agent {
+            text: reply,
+            timestamp: chrono::Utc::now().format("%H:%M").to_string(),
+        });
     }
 
-    // Create a test screen dump
+    // Render through the REAL TUI rendering path
+    let width: u16 = 100;
+    let mut all_lines = Vec::new();
+    for msg in &chat {
+        all_lines.extend(tui::render_message(msg, &theme, width));
+    }
+    all_lines.push(ratatui::text::Line::from("  Type a message... (Ctrl+P for commands)"));
+
     let dump_dir = if cfg!(target_os = "windows") {
         std::env::var("APPDATA")
             .map(std::path::PathBuf::from)
@@ -337,26 +392,19 @@ async fn run_dump_mode(config_path: &Option<String>) {
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
     let filepath = dump_dir.join(format!("screen_dump_{}.txt", timestamp));
 
-    // Create a test screen (bubble-less style: bg + left accent)
-    let screen = vec![
-        "",
-        "  Welcome to Alfred! Type a message to start. Press Ctrl+P for commands.",
-        "",
-        "▌",
-        "▌ You (21:32)",
-        "▌   Hello there! What is your name?",
-        "▌",
-        "",
-        "▌",
-        "▌ Alfred (21:32)",
-        "▌   Hello! I'm Alfred, your AI assistant.",
-        "▌   I can help you manage tasks, store memories, and more.",
-        "▌",
-        "",
-        "  Type a message... (Ctrl+P for commands)",
-    ];
+    let mut screen_lines = Vec::new();
+    for line in all_lines.iter() {
+        let mut text = String::new();
+        for span in line.iter() {
+            text.push_str(&span.content);
+        }
+        screen_lines.push(text.trim_end().to_string());
+    }
+    while screen_lines.last().map_or(false, |l| l.trim().is_empty()) {
+        screen_lines.pop();
+    }
 
-    let content = screen.join("\n");
+    let content = screen_lines.join("\n");
     std::fs::write(&filepath, content).expect("Failed to write dump file");
 
     println!("Screen dump saved to: {}", filepath.display());
