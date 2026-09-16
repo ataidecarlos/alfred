@@ -64,11 +64,14 @@ enum CommandAction {
     Quit,
 }
 
+const PALETTE_VISIBLE_ROWS: usize = 8;
+
 struct CommandPalette {
     commands: Vec<Command>,
     filtered: Vec<Command>,
     filter: String,
     selected: usize,
+    scroll: usize,
     visible: bool,
 }
 
@@ -90,6 +93,7 @@ impl CommandPalette {
             filtered: commands,
             filter: String::new(),
             selected: 0,
+            scroll: 0,
             visible: false,
         }
     }
@@ -100,6 +104,7 @@ impl CommandPalette {
             self.filter.clear();
             self.filtered = self.commands.clone();
             self.selected = 0;
+            self.scroll = 0;
         }
     }
 
@@ -114,17 +119,25 @@ impl CommandPalette {
                 .collect();
         }
         self.selected = 0;
+        self.scroll = 0;
     }
 
     fn move_up(&mut self) {
         if self.selected > 0 {
             self.selected -= 1;
+            if self.selected < self.scroll {
+                self.scroll = self.selected;
+            }
         }
     }
 
     fn move_down(&mut self) {
         if self.selected + 1 < self.filtered.len() {
             self.selected += 1;
+            let visible = self.filtered.len().min(PALETTE_VISIBLE_ROWS);
+            if self.selected >= self.scroll + visible {
+                self.scroll = self.selected + 1 - visible;
+            }
         }
     }
 }
@@ -523,11 +536,13 @@ fn render_command_palette(app: &mut TuiApp, f: &mut ratatui::Frame) {
         .style(Style::default().fg(app.theme.menu_text).bg(app.theme.menu_bg));
     f.render_widget(filter_widget, filter_area);
 
-    // Commands
+    // Commands (scroll-aware so the selected item is always visible)
     let list_start = y + 4;
-    for (i, cmd) in app.command_palette.filtered.iter().take(8).enumerate() {
-        let row = Rect { x: x + 2, y: list_start + i as u16, width: palette_width - 4, height: 1 };
-        let is_selected = i == app.command_palette.selected;
+    let scroll = app.command_palette.scroll;
+    let selected = app.command_palette.selected;
+    for (row_idx, (item_idx, cmd)) in app.command_palette.filtered.iter().enumerate().skip(scroll).take(PALETTE_VISIBLE_ROWS).enumerate() {
+        let row = Rect { x: x + 2, y: list_start + row_idx as u16, width: palette_width - 4, height: 1 };
+        let is_selected = item_idx == selected;
         let style = if is_selected {
             Style::default().bg(app.theme.menu_selected).fg(app.theme.menu_text)
         } else {
@@ -681,8 +696,9 @@ pub async fn run(server_url: String) -> Result<(), Box<dyn std::error::Error>> {
             f.render_widget(input, chunks[1]);
 
             if !app.is_loading && !app.command_palette.visible {
+                // Input block has no borders/title, so text sits on the first row.
                 let cursor_x = chunks[1].x + 2 + app.cursor_position as u16;
-                let cursor_y = chunks[1].y + 1;
+                let cursor_y = chunks[1].y;
                 if cursor_x < chunks[1].x + chunks[1].width {
                     f.set_cursor_position((cursor_x, cursor_y));
                 }
