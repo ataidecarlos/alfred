@@ -15,6 +15,8 @@ pub struct AppConfig {
     pub prompt: PromptConfig,
     #[serde(default)]
     pub scheduler: SchedulerConfig,
+    #[serde(default)]
+    pub memory: MemoryConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -62,6 +64,42 @@ pub struct SchedulerConfig {
     pub enabled: bool,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct MemoryConfig {
+    #[serde(default = "default_memory_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_vault_path")]
+    pub vault_path: String,
+    #[serde(default = "default_memory_mode")]
+    pub mode: String,
+    #[serde(default = "default_cli_check_interval")]
+    pub cli_check_interval_secs: u64,
+    #[serde(default = "default_retrieval_threshold")]
+    pub retrieval_review_threshold_days: i64,
+    #[serde(default = "default_distillation_interval")]
+    pub distillation_interval_secs: u64,
+    #[serde(default = "default_cloud_provider")]
+    pub cloud_provider: String,
+    #[serde(default = "default_cloud_model")]
+    pub cloud_model: String,
+    #[serde(default = "default_cloud_limit")]
+    pub cloud_monthly_limit: f64,
+    #[serde(default)]
+    pub local_preprocessing: bool,
+    #[serde(default = "default_local_backend")]
+    pub local_backend: String,
+    #[serde(default = "default_local_model")]
+    pub local_model: String,
+    #[serde(default)]
+    pub full_local: bool,
+    #[serde(default = "default_local_llm_provider")]
+    pub local_llm_provider: String,
+    #[serde(default = "default_local_llm_url")]
+    pub local_llm_base_url: String,
+    #[serde(default = "default_local_llm_model")]
+    pub local_llm_model: String,
+}
+
 fn default_port() -> u16 { 8080 }
 fn default_host() -> String { "0.0.0.0".into() }
 fn default_db_path() -> String {
@@ -76,9 +114,53 @@ fn default_user_prompt_path() -> String {
 }
 fn default_true() -> bool { true }
 
+fn default_memory_enabled() -> bool { true }
+fn default_vault_path() -> String {
+    if cfg!(target_os = "windows") {
+        "C:\\Users\\ataid\\vaults\\Ataide\\Alfred".into()
+    } else {
+        "/home/user/vaults/Alfred".into()
+    }
+}
+fn default_memory_mode() -> String { "auto".into() }
+fn default_cli_check_interval() -> u64 { 300 }
+fn default_retrieval_threshold() -> i64 { 90 }
+fn default_distillation_interval() -> u64 { 7200 }
+fn default_cloud_provider() -> String { "openai".into() }
+fn default_cloud_model() -> String { "gpt-4o-mini".into() }
+fn default_cloud_limit() -> f64 { 5.0 }
+fn default_local_backend() -> String { "auto".into() }
+fn default_local_model() -> String { "phi-4-mini-instruct".into() }
+fn default_local_llm_provider() -> String { "ollama".into() }
+fn default_local_llm_url() -> String { "http://localhost:11434/v1".into() }
+fn default_local_llm_model() -> String { "qwen3:8b".into() }
+
 impl Default for SchedulerConfig {
     fn default() -> Self {
         Self { enabled: true }
+    }
+}
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            vault_path: default_vault_path(),
+            mode: "auto".into(),
+            cli_check_interval_secs: 300,
+            retrieval_review_threshold_days: 90,
+            distillation_interval_secs: 7200,
+            cloud_provider: "openai".into(),
+            cloud_model: "gpt-4o-mini".into(),
+            cloud_monthly_limit: 5.0,
+            local_preprocessing: false,
+            local_backend: "auto".into(),
+            local_model: "phi-4-mini-instruct".into(),
+            full_local: false,
+            local_llm_provider: "ollama".into(),
+            local_llm_base_url: "http://localhost:11434/v1".into(),
+            local_llm_model: "qwen3:8b".into(),
+        }
     }
 }
 

@@ -1,0 +1,61 @@
+# OpenCode Go API Key for Alfred Testing
+# Get your key at: https://opencode.ai/zen/settings/api-keys
+# Subscribe to Go ($10/month) for access to these models
+#
+# Models sorted by cost (cheapest first = most requests per 5h window).
+# The application will try each model in order and fall through to the next on failure.
+#
+# Usage:
+#   1. Copy this file to test_api_keys.toml
+#   2. Add your API key to test_api_keys.toml
+#   3. The .toml file is gitignored and will never be committed
+
+[opencode_go]
+api_key = ""
+base_url = "https://opencode.ai/zen/go/v1"
+
+# Model preference order (cheapest first, exhaust before moving to next)
+# 1. Union Alpha              - ∞ req/5h, ∞ limit      (free, limited time)
+# 2. Muse Spark 1.2 Contributor - 45,300 req/5h, $60 limit
+# 3. Muse Spark 1.3 Contributor - 45,300 req/5h, $60 limit
+# 4. MiMo-V2.5                - 30,100 req/5h, $60 limit
+# 5. DeepSeek V4.1 Flash      - 26,000 req/5h, $60 limit (4x usage, new)
+# 6. DeepSeek V4 Flash        - 13,000 req/5h, $30 limit
+# 7. LongCat-2.0              - 11,400 req/5h, $60 limit
+# 8. DeepSeek V4 Flash Vision Exp - 6,500 req/5h, $15 limit
+# 9. GLM-5.3-Flash            - 6,320 req/5h, $60 limit
+# 10. Qwen3.8 Flash           - 5,400 req/5h, $30 limit
+# 11. Hy3                     - 4,300 req/5h, $60 limit
+# 12. Qwen3.7 Plus            - 4,300 req/5h, $60 limit
+# 13. MiniMax M2.7            - 3,400 req/5h, $60 limit
+# 14. Qwen3.6 Plus            - 3,300 req/5h, $60 limit
+# 15. MiMo-V2.5-Pro           - 3,250 req/5h, $15 limit
+# 16. MiniMax M3              - 3,200 req/5h, $60 limit
+# 17. GPT 5.6 Luna            - 2,050 req/5h, $15 limit
+# 18. Hy4 preview             - 1,350 req/5h, $30 limit
+# 19. Kimi K2.7 Code          - 1,350 req/5h, $60 limit
+# 20. Kimi K2.6               - 1,150 req/5h, $60 limit
+
+[opencode_go.models]
+preference_order = [
+    "union-alpha",
+    "muse-spark-1.2-contributor",
+    "muse-spark-1.3-contributor",
+    "mimo-v2.5",
+    "deepseek-v4.1-flash",
+    "deepseek-v4-flash",
+    "longcat-2.0",
+    "deepseek-v4-flash-vision-exp",
+    "glm-5.3-flash",
+    "qwen3.8-flash",
+    "hy3",
+    "qwen3.7-plus",
+    "minimax-m2.7",
+    "qwen3.6-plus",
+    "mimo-v2.5-pro",
+    "minimax-m3",
+    "gpt-5.6-luna",
+    "hy4-preview",
+    "kimi-k2.7-code",
+    "kimi-k2.6"
+]

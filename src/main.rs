@@ -3,6 +3,7 @@ mod config;
 mod connectors;
 mod error;
 mod llm;
+mod memory;
 mod paths;
 mod prompt;
 mod scheduler;
@@ -255,6 +256,13 @@ async fn run_server_mode(config_path: &Option<String>) {
 async fn initialize_state(config: &config::AppConfig) -> Result<AppState, Box<dyn std::error::Error>> {
     let store = Arc::new(Store::new(Paths::database_file().as_path())?);
 
+    let vault_path = std::path::PathBuf::from(&config.memory.vault_path);
+    if config.memory.enabled {
+        if let Err(e) = memory::vault::scaffold_vault(&vault_path) {
+            tracing::warn!("Failed to scaffold vault: {}", e);
+        }
+    }
+
     let provider_name = &config.llm.default_provider;
     let provider_config = config.llm.providers.get(provider_name)
         .ok_or_else(|| format!("Provider '{}' not found in config", provider_name))?;
@@ -278,6 +286,7 @@ async fn initialize_state(config: &config::AppConfig) -> Result<AppState, Box<dy
         active_connections: Arc::new(AtomicUsize::new(0)),
         port: config.server.port,
         api_key: None,
+        vault_path,
     })
 }
 

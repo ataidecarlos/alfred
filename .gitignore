@@ -37,3 +37,6 @@ Thumbs.db
 
 # Local variables (contains secrets)
 local_vars.txt
+
+# Test API keys (contains secrets)
+test_api_keys.toml

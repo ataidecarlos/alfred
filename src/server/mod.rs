@@ -29,6 +29,7 @@ pub struct AppState {
     pub active_connections: Arc<AtomicUsize>,
     pub port: u16,
     pub api_key: Option<String>,
+    pub vault_path: std::path::PathBuf,
 }
 
 async fn connection_tracker(state: axum::extract::State<AppState>, req: Request, next: Next) -> Response {

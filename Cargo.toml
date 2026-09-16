@@ -26,3 +26,7 @@ base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
 ratatui = "0.29"
 crossterm = { version = "0.28", features = ["event-stream"] }
+walkdir = "2"
+serde_yaml = "0.9"
+regex = "1"
+slug = "0.1"

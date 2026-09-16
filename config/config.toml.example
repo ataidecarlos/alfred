@@ -33,3 +33,21 @@ user_prompt_file = "prompts/user.md"
 
 [scheduler]
 enabled = true
+
+[memory]
+enabled = true
+vault_path = "/home/user/vaults/Alfred"
+mode = "auto"
+cli_check_interval_secs = 300
+retrieval_review_threshold_days = 90
+distillation_interval_secs = 7200
+cloud_provider = "openai"
+cloud_model = "gpt-4o-mini"
+cloud_monthly_limit = 5.0
+local_preprocessing = false
+local_backend = "auto"
+local_model = "phi-4-mini-instruct"
+full_local = false
+local_llm_provider = "ollama"
+local_llm_base_url = "http://localhost:11434/v1"
+local_llm_model = "qwen3:8b"
