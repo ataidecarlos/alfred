@@ -12,57 +12,57 @@ Alfred needs a structured memory system inspired by Obsidian vaults. Memories ar
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                        Alfred Memory System                             │
 │                                                                         │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────────────────┐  │
-│  │   Sessions   │───▶│   Backlog    │───▶│  NPU Complexity Scoring  │  │
-│  │  (SQLite)    │    │  (pending    │    │  (local, $0)             │  │
-│  │              │    │   distill)   │    │                          │  │
-│  └──────────────┘    └──────────────┘    └────────────┬─────────────┘  │
-│                                                       │                │
-│                              ┌────────────────────────┼──────────┐     │
-│                              │                        │          │     │
-│                              ▼                        ▼          ▼     │
-│                    ┌──────────────┐         ┌──────────────┐         │
-│                    │ Easy (70-80%)│         │ Med/Complex  │         │
-│                    │ NPU extracts │         │ (20-30%)     │         │
-│                    │ basic info   │         │              │         │
-│                    └──────┬───────┘         └──────┬───────┘         │
-│                           │                        │                 │
-│                           │              ┌─────────┴─────────┐      │
-│                           │              │                   │      │
-│                           │              ▼                   ▼      │
-│                           │    ┌──────────────┐    ┌──────────────┐  │
-│                           │    │ Flag ON:     │    │ Flag OFF:    │  │
-│                           │    │ LLM distills │    │ Basic info   │  │
-│                           │    │ deep insights│    │ only         │  │
-│                           │    └──────┬───────┘    └──────┬───────┘  │
-│                           │           │                   │          │
-│                           └───────────┼───────────────────┘          │
-│                                       │                              │
-│                                       ▼                              │
-│                    ┌──────────────────────────────────────────────┐   │
-│                    │         Intermediate Store (SQLite)          │   │
-│                    │  - Extracted insights (not yet memories)     │   │
-│                    │  - Complexity scores                         │   │
-│                    │  - Pending review/creation                   │   │
-│                    └────────────────────┬─────────────────────────┘   │
-│                                         │                            │
-│                                         ▼                            │
-│                    ┌──────────────────────────────────────────────┐   │
-│                    │    LLM Memory Creation (flag-gated)          │   │
-│                    │  - Is this relevant enough for a memory?     │   │
-│                    │  - Does a similar memory already exist?      │   │
-│                    │  - If yes: create new .md in Obsidian vault  │   │
-│                    │  - If exists: enhance/update existing memory │   │
-│                    └────────────────────┬─────────────────────────┘   │
-│                                         │                            │
-│                                         ▼                            │
-│                    ┌──────────────────────────────────────────────┐   │
-│                    │         Obsidian Vault (final destination)   │   │
-│                    │  C:\Users\ataid\vaults\Ataide\Alfred\        │   │
-│                    │  - .md files with frontmatter                │   │
-│                    │  - Wikilinks, MOCs, Bases                    │   │
-│                    │  - retrieval_count tracking                  │   │
-│                    └──────────────────────────────────────────────┘   │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────────────────┐   │
+│  │   Sessions   │──> │   Backlog    │───>│  NPU Complexity Scoring  │   │
+│  │  (SQLite)    │    │  (pending    │    │  (local, $0)             │   │
+│  │              │    │   distill)   │    │                          │   │
+│  └──────────────┘    └──────────────┘    └────────────┬─────────────┘   │
+│                                                       │                 │
+│                              ┌────────────────────────┼──────────┐      │
+│                              │                        │          │      │
+│                              ▼                        ▼          ▼      │
+│                    ┌──────────────┐         ┌──────────────┐            │
+│                    │ Easy (70-80%)│         │ Med/Complex  │            │
+│                    │ NPU extracts │         │ (20-30%)     │            │
+│                    │ basic info   │         │              │            │
+│                    └──────┬───────┘         └──────┬───────┘            │
+│                           │                        │                    │
+│                           │              ┌─────────┴─────────┐          │
+│                           │              │                   │          │
+│                           │              ▼                   ▼          │
+│                           │    ┌──────────────┐    ┌──────────────┐     │
+│                           │    │ Flag ON:     │    │ Flag OFF:    │     │
+│                           │    │ LLM distills │    │ Basic info   │     │
+│                           │    │ deep insights│    │ only         │     │
+│                           │    └──────┬───────┘    └──────┬───────┘     │
+│                           │           │                   │             │
+│                           └───────────┼───────────────────┘             │
+│                                       │                                 │
+│                                       ▼                                 │
+│                    ┌──────────────────────────────────────────────┐     │
+│                    │         Intermediate Store (SQLite)          │     │
+│                    │  - Extracted insights (not yet memories)     │     │
+│                    │  - Complexity scores                         │     │
+│                    │  - Pending review/creation                   │     │
+│                    └────────────────────┬─────────────────────────┘     │
+│                                         │                               │
+│                                         ▼                               │
+│                    ┌──────────────────────────────────────────────┐     │
+│                    │    LLM Memory Creation (flag-gated)          │     │
+│                    │  - Is this relevant enough for a memory?     │     │
+│                    │  - Does a similar memory already exist?      │     │
+│                    │  - If yes: create new .md in Obsidian vault  │     │
+│                    │  - If exists: enhance/update existing memory │     │
+│                    └────────────────────┬─────────────────────────┘     │
+│                                         │                               │
+│                                         ▼                               │
+│                    ┌──────────────────────────────────────────────┐     │
+│                    │         Obsidian Vault (final destination)   │     │
+│                    │  C:\Users\ataid\vaults\Ataide\Alfred\        │     │
+│                    │  - .md files with frontmatter                │     │
+│                    │  - Wikilinks, MOCs, Bases                    │     │
+│                    │  - retrieval_count tracking                  │     │
+│                    └──────────────────────────────────────────────┘     │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -338,7 +338,7 @@ distilled_from: "conversation-2026-09-16-001"
 
 ```toml
 [memory]
-vault_path = "C:\\Users\\ataid\\vaults\\Ataide\\Alfred"
+vault_path = "C:\\Users\\ataid\\vaults\\Ataide\\Alfred" # user configurable
 mode = "auto"                         # auto | cli | files
 cli_check_interval_secs = 300
 
@@ -349,7 +349,7 @@ llm_distillation_enabled = false      # Flag for LLM-based distillation (costs $
 llm_distillation_monthly_limit = 5.0  # Max $ per month for LLM distillation
 
 # NPU settings
-npu_model_path = "models/qwen3-4b-instruct.onnx"
+npu_model_path = "models/qwen3-4b-instruct.onnx" # TODO -> to be configured at install time
 npu_provider = "QNNExecutionProvider"
 
 # Memory lifecycle
