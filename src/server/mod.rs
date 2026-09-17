@@ -25,6 +25,7 @@ pub struct AppState {
     pub model: String,
     pub system_prompt: String,
     pub event_tx: broadcast::Sender<AgentEvent>,
+    pub bus: Arc<crate::bus::MessageBus>,
     pub start_time: Instant,
     pub active_connections: Arc<AtomicUsize>,
     pub port: u16,

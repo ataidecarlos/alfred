@@ -61,6 +61,23 @@ pub struct Store {
 }
 
 impl Store {
+    /// Access the raw connection. Used by SessionManager for schema migrations
+    /// and direct queries that the Store API doesn't cover yet.
+    pub fn conn(&self) -> std::sync::MutexGuard<'_, Connection> {
+        self.conn.lock().map_err(|e| {
+            // Poisoned mutex — this is a programming error, not a runtime one.
+            // Unwrap to surface it during development.
+            panic!("Store mutex poisoned: {}", e)
+        }).unwrap()
+    }
+
+    /// Create a Store from an existing connection (for testing).
+    pub fn from_connection(conn: Connection) -> Self {
+        Self { conn: Mutex::new(conn) }
+    }
+}
+
+impl Store {
     pub fn new(path: &Path) -> Result<Self, AlfredError> {
         let conn = Connection::open(path)?;
         conn.execute_batch(
@@ -132,6 +149,28 @@ impl Store {
                 updated_at INTEGER NOT NULL,
                 retrieval_count INTEGER NOT NULL DEFAULT 0,
                 last_retrieved INTEGER
+            );
+            CREATE TABLE IF NOT EXISTS workspaces (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL DEFAULT 'default',
+                path TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL DEFAULT 'default',
+                user_id TEXT NOT NULL,
+                channel TEXT NOT NULL,
+                title TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS messages (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                timestamp INTEGER NOT NULL
             );"
         )?;
         Ok(Self { conn: Mutex::new(conn) })

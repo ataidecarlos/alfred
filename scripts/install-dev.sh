@@ -56,18 +56,40 @@ fi
 
 ok "Cleaned existing installation"
 
-# ── Step 2: Verify Rust is installed ──────────────────────────────────
+# ── Step 2: Provision build dependencies ──────────────────────────────
+
+# Install system build dependencies
+install_build_deps() {
+    echo "Installing build dependencies..."
+    if command -v apt-get &>/dev/null; then
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq build-essential pkg-config libssl-dev sqlite3 libsqlite3-dev
+    elif command -v dnf &>/dev/null; then
+        sudo dnf install -y gcc make pkg-config openssl-devel sqlite-devel sqlite
+    elif command -v pacman &>/dev/null; then
+        sudo pacman -S --noconfirm base-devel openssl sqlite
+    elif command -v apk &>/dev/null; then
+        apk add --no-cache build-base pkgconf openssl-dev sqlite-dev sqlite
+    else
+        warn "Unknown package manager — install build-essential, pkg-config, libssl-dev, sqlite3 manually"
+    fi
+}
+
 # Source cargo environment if available
 if [ -f "$HOME/.cargo/env" ]; then
     source "$HOME/.cargo/env"
 fi
 
 if ! command -v cargo &>/dev/null; then
-    fail "Rust not installed."
-    echo "  Install with: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
-    exit 1
+    ok "Rust not found — installing via rustup..."
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    source "$HOME/.cargo/env"
 fi
-ok "Rust toolchain found: $(rustc --version)"
+ok "Rust toolchain: $(rustc --version)"
+
+# Install build dependencies (idempotent)
+install_build_deps
+ok "Build dependencies installed"
 
 # ── Step 3: Build Alfred ──────────────────────────────────────────────
 echo ""

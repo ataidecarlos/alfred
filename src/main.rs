@@ -1,4 +1,5 @@
 mod agent;
+mod bus;
 mod config;
 mod connectors;
 mod error;
@@ -8,10 +9,12 @@ mod paths;
 mod prompt;
 mod scheduler;
 mod server;
+mod session;
 mod store;
 mod tools;
 mod tui;
 mod types;
+mod workspace;
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
@@ -308,6 +311,7 @@ async fn initialize_state(config: &config::AppConfig) -> Result<AppState, Box<dy
 
     let tools = Arc::new(register_builtins(store.clone()));
     let (event_tx, _) = tokio::sync::broadcast::channel(256);
+    let bus = Arc::new(crate::bus::MessageBus::new(256));
 
     Ok(AppState {
         store,
@@ -316,6 +320,7 @@ async fn initialize_state(config: &config::AppConfig) -> Result<AppState, Box<dy
         model,
         system_prompt,
         event_tx,
+        bus,
         start_time: Instant::now(),
         active_connections: Arc::new(AtomicUsize::new(0)),
         port: config.server.port,

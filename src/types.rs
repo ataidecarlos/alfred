@@ -35,7 +35,7 @@ pub struct Usage {
     pub total: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum StopReason {
     Stop,
     Length,

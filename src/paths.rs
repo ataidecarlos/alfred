@@ -15,7 +15,15 @@ impl Paths {
         if cfg!(target_os = "windows") {
             dirs().join("alfred")
         } else {
-            dirs().join("alfred")
+            // XDG: ~/.local/share/alfred
+            std::env::var("XDG_DATA_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| {
+                    let home = std::env::var("HOME")
+                        .expect("Cannot determine home directory");
+                    PathBuf::from(home).join(".local").join("share")
+                })
+                .join("alfred")
         }
     }
 
@@ -25,6 +33,11 @@ impl Paths {
         } else {
             dirs().join("alfred")
         }
+    }
+
+    /// Directory for workspace roots.
+    pub fn workspace_dir() -> PathBuf {
+        Self::data_dir().join("workspace")
     }
 
     pub fn config_file() -> PathBuf {

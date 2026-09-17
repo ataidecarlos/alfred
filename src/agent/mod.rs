@@ -1,17 +1,99 @@
 pub mod event;
+pub mod runner;
 pub mod tool;
+
+// Re-exports
+pub use runner::AgentRunner;
 
 use std::sync::Arc;
 
-use futures::StreamExt;
 use tokio::sync::broadcast;
-use tracing::{info, error};
+use tracing::info;
 
-use crate::llm::{LlmProvider, LlmStreamEvent};
-use crate::types::{Message, text_content, AssistantMessage, ContentBlock, StopReason, Usage, ToolCall, ToolResultMessage};
+use crate::bus::{InboundMessage, OutboundMessage};
+use crate::session::{SessionKey, SessionManager};
 use crate::agent::event::AgentEvent;
 use crate::agent::tool::ToolRegistry;
+use crate::llm::LlmProvider;
+use crate::types::{Message, UserMessage, Content, TextContent, StopReason, Usage};
 
+/// Channel-facing agent loop. Receives inbound messages, resolves sessions,
+/// builds context, calls the runner, saves results, and publishes outbound messages.
+pub struct AgentLoop {
+    runner: AgentRunner,
+    session_manager: Arc<SessionManager>,
+    system_prompt: String,
+    event_tx: broadcast::Sender<AgentEvent>,
+}
+
+impl AgentLoop {
+    pub fn new(
+        runner: AgentRunner,
+        session_manager: Arc<SessionManager>,
+        system_prompt: String,
+        event_tx: broadcast::Sender<AgentEvent>,
+    ) -> Self {
+        Self { runner, session_manager, system_prompt, event_tx }
+    }
+
+    /// Handle an inbound message: resolve session, run agent, save, return reply.
+    pub async fn handle(&self, inbound: InboundMessage) -> OutboundMessage {
+        let key = SessionKey::new(&inbound.user_id, &inbound.channel);
+
+        // Resolve or create session
+        let mut session = match self.session_manager.resolve_or_create(&key) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("Failed to resolve session: {}", e);
+                return OutboundMessage {
+                    session_key: inbound.session_key,
+                    channel: inbound.channel,
+                    text: format!("Error: {}", e),
+                };
+            }
+        };
+
+        // Append user message
+        let user_msg = Message::User(UserMessage {
+            content: vec![Content::Text(TextContent { text: inbound.text })],
+            timestamp: chrono::Utc::now(),
+        });
+        session.messages.push(user_msg);
+
+        // Run the agent
+        let _ = self.event_tx.send(AgentEvent::AgentStart);
+        let result = self.runner.run(&self.system_prompt, session.messages).await;
+        let _ = self.event_tx.send(AgentEvent::AgentEnd {
+            messages: result.messages.clone(),
+        });
+
+        // Update session with new messages
+        session.messages = result.messages;
+
+        // Save session
+        if let Err(e) = self.session_manager.save(&session) {
+            tracing::error!("Failed to save session: {}", e);
+        }
+
+        // Extract reply text
+        let reply = session.messages.iter().rev().find_map(|m| {
+            let text = crate::types::extract_text(m);
+            if !text.is_empty() {
+                Some(text)
+            } else {
+                None
+            }
+        }).unwrap_or_else(|| "No response generated.".into());
+
+        OutboundMessage {
+            session_key: inbound.session_key,
+            channel: inbound.channel,
+            text: reply,
+        }
+    }
+}
+
+/// Legacy context for backward compatibility. New code should use AgentLoop instead.
 pub struct AgentLoopContext {
     pub system_prompt: String,
     pub messages: Vec<Message>,
@@ -22,175 +104,124 @@ pub struct AgentLoopContext {
     pub max_turns: u32,
 }
 
+/// Legacy function for backward compatibility. New code should use AgentLoop.
 pub async fn run_agent_loop(ctx: &mut AgentLoopContext) -> Vec<Message> {
-    let mut turn = 0;
+    let runner = AgentRunner {
+        provider: ctx.provider.clone(),
+        model: ctx.model.clone(),
+        tools: ctx.tools.clone(),
+        max_turns: ctx.max_turns,
+    };
 
     let _ = ctx.event_tx.send(AgentEvent::AgentStart);
-
-    loop {
-        turn += 1;
-        if turn > ctx.max_turns {
-            info!("max turns reached ({}), stopping", ctx.max_turns);
-            break;
-        }
-
-        let _ = ctx.event_tx.send(AgentEvent::TurnStart { turn });
-
-        // Build LLM request
-        let tool_defs = ctx.tools.definitions();
-        let request = crate::llm::LlmRequest {
-            model: ctx.model.clone(),
-            system_prompt: ctx.system_prompt.clone(),
-            messages: ctx.messages.clone(),
-            tools: tool_defs,
-            max_tokens: Some(4096),
-        };
-
-        tracing::debug!("Calling LLM provider with model: {}", ctx.model);
-
-        // Stream response
-        let stream = match ctx.provider.stream(request).await {
-            Ok(s) => s,
-            Err(e) => {
-                error!("LLM stream error: {}", e);
-                let _ = ctx.event_tx.send(AgentEvent::AgentError(e.to_string()));
-                break;
-            }
-        };
-
-    let mut accumulated_text = String::new();
-    let mut tool_calls_out: Vec<ToolCall> = Vec::new();
-    let mut tool_call_args: Vec<String> = Vec::new();
-    let mut stop_reason = StopReason::Stop;
-        let mut usage = Usage { input: 0, output: 0, total: 0 };
-
-        futures::pin_mut!(stream);
-        while let Some(event) = stream.next().await {
-            match event {
-                LlmStreamEvent::Start => {
-                    let _ = ctx.event_tx.send(AgentEvent::MessageStart);
-                }
-                LlmStreamEvent::TextDelta(delta) => {
-                    let _ = ctx.event_tx.send(AgentEvent::MessageDelta { delta: delta.clone() });
-                }
-                LlmStreamEvent::ToolCallDelta { index, id, name, args_delta } => {
-                    // Accumulate tool calls
-                    while tool_calls_out.len() <= index {
-                        tool_calls_out.push(ToolCall {
-                            id: String::new(),
-                            name: String::new(),
-                            arguments: serde_json::json!({}),
-                        });
-                        tool_call_args.push(String::new());
-                    }
-                    if let Some(id) = id { tool_calls_out[index].id = id; }
-                    if let Some(name) = name { tool_calls_out[index].name = name; }
-                    if !args_delta.is_empty() {
-                        tool_call_args[index].push_str(&args_delta);
-                    }
-                    let _ = ctx.event_tx.send(AgentEvent::MessageDelta { delta: format!("[tool_call:{}]", index) });
-                }
-                LlmStreamEvent::Done { text, tool_calls, stop_reason: sr, usage: u } => {
-                    accumulated_text = text;
-                    // Parse accumulated tool call args
-                    for (i, tc) in tool_calls_out.iter_mut().enumerate() {
-                        if i < tool_call_args.len() && !tool_call_args[i].is_empty() {
-                            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&tool_call_args[i]) {
-                                tc.arguments = v;
-                            }
-                        }
-                    }
-                    // Merge with final tool calls if available
-                    if !tool_calls.is_empty() {
-                        for tc in tool_calls {
-                            if let Some(existing) = tool_calls_out.iter_mut().find(|t| t.name == tc.name && t.id.is_empty()) {
-                                existing.id = tc.id;
-                                existing.name = tc.name;
-                                if !tc.arguments.is_null() && !tc.arguments.as_object().map_or(false, |o| o.is_empty()) {
-                                    existing.arguments = tc.arguments;
-                                }
-                            } else if !tool_calls_out.iter().any(|t| t.id == tc.id) {
-                                tool_calls_out.push(tc);
-                            }
-                        }
-                    }
-                    stop_reason = sr;
-                    usage = u;
-                }
-                LlmStreamEvent::Error(e) => {
-                    let _ = ctx.event_tx.send(AgentEvent::AgentError(e));
-                    break;
-                }
-            }
-        }
-
-        // Build assistant message
-        let mut content = Vec::new();
-        if !accumulated_text.is_empty() {
-            content.push(ContentBlock::Text { text: accumulated_text });
-        }
-        content.extend(tool_calls_out.iter().map(|tc| ContentBlock::ToolCall(tc.clone())));
-
-        let assistant_msg = AssistantMessage {
-            content,
-            usage: usage.clone(),
-            stop_reason: stop_reason.clone(),
-            model: ctx.model.clone(),
-            timestamp: chrono::Utc::now(),
-        };
-
-        let _ = ctx.event_tx.send(AgentEvent::MessageEnd);
-        ctx.messages.push(Message::Assistant(assistant_msg.clone()));
-
-        // If no tool calls, we're done
-        let has_tool_calls = !tool_calls_out.is_empty();
-        if !has_tool_calls || matches!(stop_reason, StopReason::Error | StopReason::Aborted) {
-            let _ = ctx.event_tx.send(AgentEvent::TurnEnd {
-                message: assistant_msg,
-                tool_results: Vec::new(),
-            });
-            break;
-        }
-
-        // Execute tool calls
-        let mut tool_results = Vec::new();
-        for tc in &tool_calls_out {
-            tracing::debug!("Executing tool call: {} with args: {}", tc.name, tc.arguments);
-            let _ = ctx.event_tx.send(AgentEvent::ToolExecutionStart {
-                tool_call_id: tc.id.clone(),
-                tool_name: tc.name.clone(),
-                args: tc.arguments.clone(),
-            });
-
-            let result = ctx.tools.execute(&tc.name, tc.arguments.clone()).await;
-            tracing::debug!("Tool result: {}", result.output);
-
-            let tool_result_msg = ToolResultMessage {
-                tool_call_id: tc.id.clone(),
-                tool_name: tc.name.clone(),
-                content: vec![text_content(result.output)],
-                is_error: result.is_error,
-                timestamp: chrono::Utc::now(),
-            };
-
-            let _ = ctx.event_tx.send(AgentEvent::ToolExecutionEnd {
-                tool_call_id: tc.id.clone(),
-                result: tool_result_msg.clone(),
-            });
-
-            tool_results.push(tool_result_msg.clone());
-            ctx.messages.push(Message::ToolResult(tool_result_msg));
-        }
-
-        let _ = ctx.event_tx.send(AgentEvent::TurnEnd {
-            message: assistant_msg,
-            tool_results,
-        });
-    }
-
+    let result = runner.run(&ctx.system_prompt, ctx.messages.clone()).await;
     let _ = ctx.event_tx.send(AgentEvent::AgentEnd {
-        messages: ctx.messages.clone(),
+        messages: result.messages.clone(),
     });
 
-    ctx.messages.clone()
+    ctx.messages = result.messages.clone();
+    result.messages
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::{LlmRequest, LlmStream, LlmStreamEvent};
+    use crate::agent::tool::{ToolRegistry, Tool, ToolOutput};
+    use crate::llm::ToolDefinition;
+    use crate::error::AlfredError;
+    use async_trait::async_trait;
+
+    struct MockProvider;
+
+    #[async_trait]
+    impl LlmProvider for MockProvider {
+        async fn stream(&self, _request: LlmRequest) -> Result<LlmStream, AlfredError> {
+            let stream = async_stream::stream! {
+                yield LlmStreamEvent::Start;
+                yield LlmStreamEvent::TextDelta("test reply".into());
+                yield LlmStreamEvent::Done {
+                    text: "test reply".into(),
+                    tool_calls: vec![],
+                    stop_reason: StopReason::Stop,
+                    usage: Usage { input: 5, output: 3, total: 8 },
+                };
+            };
+            Ok(Box::pin(stream))
+        }
+    }
+
+    fn make_loop() -> AgentLoop {
+        let provider = Arc::new(MockProvider);
+        let runner = AgentRunner {
+            provider,
+            model: "test".into(),
+            tools: Arc::new(ToolRegistry::new()),
+            max_turns: 5,
+        };
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS workspaces (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT 'default',
+                path TEXT NOT NULL, created_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL DEFAULT 'default',
+                user_id TEXT NOT NULL, channel TEXT NOT NULL, title TEXT,
+                created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS messages (
+                id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+                role TEXT NOT NULL, content TEXT NOT NULL, timestamp INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS conversations (
+                id TEXT PRIMARY KEY, user_id TEXT NOT NULL, connector TEXT NOT NULL,
+                messages TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+            );"
+        ).unwrap();
+
+        let store = Arc::new(crate::store::Store::from_connection(conn));
+        let session_manager = Arc::new(SessionManager::new(store));
+        let (event_tx, _) = broadcast::channel(16);
+
+        AgentLoop::new(runner, session_manager, "system".into(), event_tx)
+    }
+
+    #[tokio::test]
+    async fn test_handle_returns_reply() {
+        let agent = make_loop();
+        let inbound = InboundMessage {
+            user_id: "u1".into(),
+            channel: "api".into(),
+            session_key: "u1:api".into(),
+            text: "hello".into(),
+        };
+
+        let reply = agent.handle(inbound).await;
+        assert_eq!(reply.text, "test reply");
+        assert_eq!(reply.channel, "api");
+    }
+
+    #[tokio::test]
+    async fn test_legacy_run_agent_loop() {
+        use crate::agent::runner::AgentRunner;
+
+        let provider = Arc::new(MockProvider);
+        let mut tools = ToolRegistry::new();
+        let (event_tx, _) = broadcast::channel(16);
+
+        let mut ctx = AgentLoopContext {
+            system_prompt: "system".into(),
+            messages: vec![],
+            provider,
+            model: "test".into(),
+            tools: Arc::new(tools),
+            event_tx,
+            max_turns: 5,
+        };
+
+        let messages = run_agent_loop(&mut ctx).await;
+        assert_eq!(messages.len(), 1); // 1 assistant message
+    }
 }
