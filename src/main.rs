@@ -228,6 +228,7 @@ async fn run_server_mode(config_path: &Option<String>) {
         Ok(s) => s,
         Err(e) => {
             error!("Failed to initialize: {}", e);
+            eprintln!("ERROR: Failed to initialize: {}", e);
             std::process::exit(1);
         }
     };
@@ -346,6 +347,7 @@ async fn run_dump_mode(
         Ok(s) => s,
         Err(e) => {
             error!("Failed to initialize: {}", e);
+            eprintln!("ERROR: Failed to initialize: {}", e);
             std::process::exit(1);
         }
     };

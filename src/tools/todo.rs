@@ -89,7 +89,8 @@ impl Tool for TodoTool {
                     None => return ToolOutput::error(String::from("id is required for complete")),
                 };
                 match self.store.complete_todo(&id) {
-                    Ok(()) => ToolOutput::success(format!("Todo {} marked as complete.", id)),
+                    Ok(true) => ToolOutput::success(format!("Todo {} marked as complete.", id)),
+                    Ok(false) => ToolOutput::error(format!("todo {} not found", id)),
                     Err(e) => ToolOutput::error(format!("failed to complete todo: {}", e)),
                 }
             }
@@ -109,7 +110,8 @@ impl Tool for TodoTool {
                     None => return ToolOutput::error(String::from("id is required for update")),
                 };
                 match self.store.update_todo(&id, args.title.as_deref(), args.description.as_deref(), args.priority.as_deref(), args.due.as_deref()) {
-                    Ok(()) => ToolOutput::success(format!("Todo {} updated.", id)),
+                    Ok(true) => ToolOutput::success(format!("Todo {} updated.", id)),
+                    Ok(false) => ToolOutput::error(format!("todo {} not found", id)),
                     Err(e) => ToolOutput::error(format!("failed to update todo: {}", e)),
                 }
             }

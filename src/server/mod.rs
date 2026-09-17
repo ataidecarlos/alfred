@@ -50,6 +50,8 @@ pub async fn start_server(
         .route("/api/todos", get(routes::list_todos))
         .route("/api/todos", axum::routing::post(routes::add_todo))
         .route("/api/todos/{id}", axum::routing::delete(routes::delete_todo))
+        .route("/api/todos/{id}", axum::routing::put(routes::update_todo))
+        .route("/api/todos/{id}/complete", axum::routing::post(routes::complete_todo))
         .route("/api/memories", get(routes::list_memories))
         .route("/api/memories", axum::routing::post(routes::add_memory))
         .route("/api/memories/{id}", axum::routing::delete(routes::delete_memory))

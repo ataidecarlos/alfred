@@ -172,6 +172,49 @@ pub async fn delete_todo(
     }
 }
 
+#[derive(Deserialize)]
+pub struct UpdateTodoRequest {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub priority: Option<String>,
+    #[serde(default)]
+    pub due: Option<String>,
+}
+
+pub async fn update_todo(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    Path(id): Path<String>,
+    Json(req): Json<UpdateTodoRequest>,
+) -> Result<StatusCode, StatusCode> {
+    match state.store.update_todo(
+        &id,
+        req.title.as_deref(),
+        req.description.as_deref(),
+        req.priority.as_deref(),
+        req.due.as_deref(),
+    ) {
+        Ok(true) => Ok(StatusCode::NO_CONTENT),
+        Ok(false) => Err(StatusCode::NOT_FOUND),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+pub async fn complete_todo(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    Path(id): Path<String>,
+) -> Result<StatusCode, StatusCode> {
+    match state.store.complete_todo(&id) {
+        Ok(true) => Ok(StatusCode::NO_CONTENT),
+        Ok(false) => Err(StatusCode::NOT_FOUND),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
 #[derive(Serialize)]
 pub struct MemoryItem {
     pub id: String,

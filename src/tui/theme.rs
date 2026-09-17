@@ -107,6 +107,27 @@ fn parse_hex(hex: &str) -> Result<Color, String> {
 }
 
 impl Theme {
+    /// Parse an already-read theme file into a Theme.
+    /// Separated from `load` so a corrupt file in one location falls
+    /// through to the next candidate instead of aborting the search.
+    fn from_file(name: &str, content: &str) -> Result<Self, String> {
+        let file: ThemeFile = toml::from_str(content).map_err(|e| e.to_string())?;
+        Ok(Self {
+            name: name.into(),
+            background: parse_hex(&file.colors.background)?,
+            message_bg: parse_hex(&file.colors.message_bg)?,
+            user_accent: parse_hex(&file.colors.user_accent)?,
+            agent_accent: parse_hex(&file.colors.agent_accent)?,
+            text: parse_hex(&file.colors.text)?,
+            text_dim: parse_hex(&file.colors.text_dim)?,
+            menu_bg: parse_hex(&file.colors.menu_bg)?,
+            menu_selected: parse_hex(&file.colors.menu_selected)?,
+            menu_text: parse_hex(&file.colors.menu_text)?,
+        })
+    }
+}
+
+impl Theme {
     pub fn load(name: &str) -> Result<Self, Box<dyn std::error::Error>> {
         // 1. Installed/user themes dir
         let candidates = [
@@ -115,28 +136,26 @@ impl Theme {
             PathBuf::from("themes").join(format!("{}.toml", name)),
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("themes").join(format!("{}.toml", name)),
         ];
-        let mut last_err: Option<Box<dyn std::error::Error>> = None;
+        let mut last_err: Option<String> = None;
         for path in &candidates {
-            match std::fs::read_to_string(path) {
-                Ok(content) => {
-                    let file: ThemeFile = toml::from_str(&content)?;
-                    return Ok(Self {
-                        name: name.into(),
-                        background: parse_hex(&file.colors.background)?,
-                        message_bg: parse_hex(&file.colors.message_bg)?,
-                        user_accent: parse_hex(&file.colors.user_accent)?,
-                        agent_accent: parse_hex(&file.colors.agent_accent)?,
-                        text: parse_hex(&file.colors.text)?,
-                        text_dim: parse_hex(&file.colors.text_dim)?,
-                        menu_bg: parse_hex(&file.colors.menu_bg)?,
-                        menu_selected: parse_hex(&file.colors.menu_selected)?,
-                        menu_text: parse_hex(&file.colors.menu_text)?,
-                    });
+            let content = match std::fs::read_to_string(path) {
+                Ok(c) => c,
+                Err(e) => {
+                    last_err = Some(format!("{}: {}", path.display(), e));
+                    continue;
                 }
-                Err(e) => last_err = Some(e.into()),
+            };
+            match Self::from_file(name, &content) {
+                Ok(theme) => return Ok(theme),
+                Err(e) => {
+                    last_err = Some(format!("{}: {}", path.display(), e));
+                    continue;
+                }
             }
         }
-        Err(last_err.unwrap_or_else(|| format!("theme '{}' not found", name).into()))
+        Err(last_err
+            .unwrap_or_else(|| format!("theme '{}' not found", name))
+            .into())
     }
 
     pub fn default_dark() -> Self {
@@ -196,5 +215,22 @@ mod tests {
     #[test]
     fn load_missing_theme_errors() {
         assert!(Theme::load("no-such-theme-xyz").is_err());
+    }
+
+    #[test]
+    fn from_file_rejects_bad_hex() {
+        let bad = "[colors]\nbackground = \"#zzzzzz\"\nmessage_bg = \"#1a1a1a\"\nuser_accent = \"#4682e6\"\nagent_accent = \"#e63946\"\ntext = \"#ffffff\"\ntext_dim = \"#888888\"\nmenu_bg = \"#1a1a1a\"\nmenu_selected = \"#333333\"\nmenu_text = \"#ffffff\"\n";
+        assert!(Theme::from_file("bad", bad).is_err());
+    }
+
+    #[test]
+    fn from_file_rejects_malformed_toml() {
+        assert!(Theme::from_file("bad", "this is not toml [[[ ").is_err());
+    }
+
+    #[test]
+    fn from_file_accepts_bundled_dark() {
+        assert!(Theme::from_file("dark", DEFAULT_DARK_TOML).is_ok());
+        assert!(Theme::from_file("light", DEFAULT_LIGHT_TOML).is_ok());
     }
 }

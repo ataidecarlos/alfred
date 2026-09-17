@@ -45,7 +45,15 @@ pub fn create_provider(
     provider_name: &str,
     config: &ProviderConfig,
 ) -> Result<Arc<dyn LlmProvider>, AlfredError> {
-    let api_key = config.api_key.as_deref().unwrap_or("");
+    let api_key = config.api_key.as_deref().unwrap_or("").trim();
+    if api_key.is_empty() {
+        return Err(AlfredError::Llm(format!(
+            "provider '{}' has no api_key configured; set providers.{}.api_key in {} (supports ${{ENV_VAR}} expansion)",
+            provider_name,
+            provider_name,
+            crate::paths::Paths::config_file().display(),
+        )));
+    }
     match provider_name {
         "openai" => Ok(Arc::new(openai::OpenAiProvider::new(api_key, config.base_url.as_deref().unwrap_or("https://api.openai.com/v1")))),
         "anthropic" => Ok(Arc::new(anthropic::AnthropicProvider::new(api_key))),

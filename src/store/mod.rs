@@ -164,11 +164,12 @@ impl Store {
         Ok(todos)
     }
 
-    pub fn complete_todo(&self, id: &str) -> Result<(), AlfredError> {
+    /// Mark a todo complete. Returns true if a row was changed, false if the id is unknown.
+    pub fn complete_todo(&self, id: &str) -> Result<bool, AlfredError> {
         let now = Utc::now().timestamp();
         let conn = self.conn.lock().map_err(|e| AlfredError::Store(rusqlite::Error::InvalidParameterName(e.to_string())))?;
-        conn.execute("UPDATE todos SET completed = 1, updated_at = ?1 WHERE id = ?2", params![now, id])?;
-        Ok(())
+        let rows = conn.execute("UPDATE todos SET completed = 1, updated_at = ?1 WHERE id = ?2", params![now, id])?;
+        Ok(rows > 0)
     }
 
     pub fn delete_todo(&self, id: &str) -> Result<(), AlfredError> {
@@ -177,22 +178,24 @@ impl Store {
         Ok(())
     }
 
-    pub fn update_todo(&self, id: &str, title: Option<&str>, description: Option<&str>, priority: Option<&str>, due_date: Option<&str>) -> Result<(), AlfredError> {
+    /// Update todo fields. Returns true if a row was changed, false if the id is unknown.
+    pub fn update_todo(&self, id: &str, title: Option<&str>, description: Option<&str>, priority: Option<&str>, due_date: Option<&str>) -> Result<bool, AlfredError> {
         let now = Utc::now().timestamp();
         let conn = self.conn.lock().map_err(|e| AlfredError::Store(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+        let mut changed = 0;
         if let Some(t) = title {
-            conn.execute("UPDATE todos SET title = ?1, updated_at = ?2 WHERE id = ?3", params![t, now, id])?;
+            changed += conn.execute("UPDATE todos SET title = ?1, updated_at = ?2 WHERE id = ?3", params![t, now, id])?;
         }
         if let Some(d) = description {
-            conn.execute("UPDATE todos SET description = ?1, updated_at = ?2 WHERE id = ?3", params![d, now, id])?;
+            changed += conn.execute("UPDATE todos SET description = ?1, updated_at = ?2 WHERE id = ?3", params![d, now, id])?;
         }
         if let Some(p) = priority {
-            conn.execute("UPDATE todos SET priority = ?1, updated_at = ?2 WHERE id = ?3", params![p, now, id])?;
+            changed += conn.execute("UPDATE todos SET priority = ?1, updated_at = ?2 WHERE id = ?3", params![p, now, id])?;
         }
         if let Some(d) = due_date {
-            conn.execute("UPDATE todos SET due_date = ?1, updated_at = ?2 WHERE id = ?3", params![d, now, id])?;
+            changed += conn.execute("UPDATE todos SET due_date = ?1, updated_at = ?2 WHERE id = ?3", params![d, now, id])?;
         }
-        Ok(())
+        Ok(changed > 0)
     }
 
     pub fn add_memory(&self, content: &str) -> Result<String, AlfredError> {
