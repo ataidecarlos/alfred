@@ -6,17 +6,12 @@ use crate::error::AlfredError;
 pub fn scaffold_vault(vault_path: &Path) -> Result<(), AlfredError> {
     info!("Scaffolding vault at: {}", vault_path.display());
 
+    // Create the main directories
     let dirs = [
-        "_templates",
-        "_attachments",
-        "_config",
-        "inbox",
-        "preferences",
-        "facts",
-        "decisions",
-        "lessons",
-        "action-items",
-        "daily",
+        "people",
+        "memory",
+        "memory/inbox",
+        "todo",
     ];
 
     for dir in &dirs {
@@ -24,201 +19,92 @@ pub fn scaffold_vault(vault_path: &Path) -> Result<(), AlfredError> {
         std::fs::create_dir_all(&path)?;
     }
 
-    let topics_path = vault_path.join("_config/topics.md");
-    if !topics_path.exists() {
-        std::fs::write(&topics_path, TOPICS_TEMPLATE)?;
+    // Create README.md if it doesn't exist
+    let readme_path = vault_path.join("README.md");
+    if !readme_path.exists() {
+        std::fs::write(&readme_path, README_TEMPLATE)?;
     }
 
-    let templates = [
-        ("_templates/memory.md", MEMORY_TEMPLATE),
-        ("_templates/decision.md", DECISION_TEMPLATE),
-        ("_templates/moc.md", MOC_TEMPLATE),
-    ];
-
-    for (name, content) in &templates {
-        let path = vault_path.join(name);
-        if !path.exists() {
-            std::fs::write(&path, content)?;
-        }
+    // Create memories.md (generic memories)
+    let memories_path = vault_path.join("memories.md");
+    if !memories_path.exists() {
+        std::fs::write(&memories_path, MEMORIES_TEMPLATE)?;
     }
 
-    let index_path = vault_path.join("index.md");
-    if !index_path.exists() {
-        std::fs::write(&index_path, INDEX_TEMPLATE)?;
-    }
-
-    let base_path = vault_path.join("alfred-index.base");
-    if !base_path.exists() {
-        std::fs::write(&base_path, BASE_TEMPLATE)?;
-    }
-
-    let categories = ["preferences", "facts", "decisions", "lessons", "action-items"];
-    for category in &categories {
-        let index_path = vault_path.join(category).join("_index.md");
-        if !index_path.exists() {
-            let content = format!("# {}\n\nNo memories yet.", capitalize(category));
-            std::fs::write(&index_path, content)?;
-        }
+    // Create todo/todo.md (general todos)
+    let todo_path = vault_path.join("todo").join("todo.md");
+    if !todo_path.exists() {
+        std::fs::write(&todo_path, TODO_TEMPLATE)?;
     }
 
     info!("Vault scaffolding complete");
     Ok(())
 }
 
-fn capitalize(s: &str) -> String {
-    let mut c = s.chars();
-    match c.next() {
-        None => String::new(),
-        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-    }
-}
+const README_TEMPLATE: &str = r#"# Alfred Memory Vault
 
-const TOPICS_TEMPLATE: &str = r#"# Topics
+Welcome to your AI-powered memory vault. This is Alfred's home for long-term memory, people profiles, and to-do lists.
 
-Controlled vocabulary for memory categorization.
+## How It Works
 
-## Communication
-- language
-- email
-- messaging
-- preferences
+Alfred reads and writes to this vault to remember things about you and your work. You can edit any file directly — Alfred will pick up changes on the next interaction.
 
-## Work
-- projects
-- tasks
-- deadlines
-- meetings
+## Structure
 
-## Technical
-- programming
-- tools
-- infrastructure
-- debugging
+- **people/** — One file per user with memories and instructions
+- **memory/** — General memories organized by topic
+  - **inbox/** — New items awaiting review
+- **memories.md** — Quick reference of important facts
+- **todo/** — To-do lists organized by user
 
-## Personal
-- preferences
-- habits
-- goals
-- health
+## Adding Memories
+
+1. Ask Alfred to remember something
+2. Or edit `memories.md` directly
+3. Or add a file to `memory/` with YAML frontmatter
+
+## Example Memory File
+
+```yaml
+---
+title: "Project deadline"
+type: fact
+status: active
+created: 2026-09-17
+---
+
+The project deadline is October 15th.
+```
 
 ## People
-- contacts
-- relationships
-- teams
 
-## Projects
-- active
-- completed
-- ideas
+Add a file in `people/` for each person Alfred should know about. Use their name as the filename (e.g., `john.md`).
+
+## Tips
+
+- Files are the source of truth — Alfred always refers to them when in doubt
+- Use Obsidian to browse and edit your vault
+- Tags and frontmatter help Alfred categorize memories
 "#;
 
-const MEMORY_TEMPLATE: &str = r#"---
-title: ""
-type: fact
-topics: []
-status: active
-created: {{date}}
-updated: {{date}}
-source: conversation
-aliases: []
-tags:
-  - memory
-retrieval_count: 0
-last_retrieved: null
-importance: medium
-distilled_from: null
----
+const MEMORIES_TEMPLATE: &str = r#"# Important Memories
 
-# Content
+Quick reference of important facts Alfred should remember.
 
+## Work
+
+## Personal
+
+## Technical
 "#;
 
-const DECISION_TEMPLATE: &str = r#"---
-title: ""
-type: decision
-topics: []
-status: active
-created: {{date}}
-updated: {{date}}
-source: conversation
-aliases: []
-tags:
-  - memory
-  - decision
-retrieval_count: 0
-last_retrieved: null
-importance: high
-distilled_from: null
-alternatives_rejected: []
-rationale: ""
----
+const TODO_TEMPLATE: &str = r#"# To-Do List
 
-# Decision
+Active to-do items. Mark items as complete with `- [x]`.
 
-## Context
+## High Priority
 
-## Alternatives Considered
+## Medium Priority
 
-## Chosen Approach
-
-## Rationale
-"#;
-
-const MOC_TEMPLATE: &str = r#"---
-title: ""
-type: moc
----
-
-# {{title}}
-
-```dataview
-TABLE file.ctime AS Created, file.mtime AS Updated
-FROM ""
-WHERE contains(topics, this.file.name)
-SORT file.mtime DESC
-```
-"#;
-
-const INDEX_TEMPLATE: &str = r#"---
-title: Alfred Memory Vault
----
-
-# Alfred Memory Vault
-
-Welcome to your AI-powered memory vault.
-
-## Categories
-
-- [[preferences/_index|Preferences]]
-- [[facts/_index|Facts]]
-- [[decisions/_index|Decisions]]
-- [[lessons/_index|Lessons]]
-- [[action-items/_index|Action Items]]
-
-## Tools
-
-- Open `alfred-index.base` for table views of all memories
-"#;
-
-const BASE_TEMPLATE: &str = r#"---
-title: Alfred Index
----
-
-# All Memories
-
-```dataview
-TABLE title AS Title, type AS Type, status AS Status, retrieval_count AS "Retrievals"
-FROM ""
-WHERE type != "moc"
-SORT file.mtime DESC
-```
-
-# Recent Memories (Last 30 Days)
-
-```dataview
-TABLE title AS Title, type AS Type, file.mtime AS Updated
-FROM ""
-WHERE type != "moc" AND file.mtime >= date(today) - dur(30 days)
-SORT file.mtime DESC
-```
+## Low Priority
 "#;

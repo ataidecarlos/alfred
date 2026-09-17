@@ -1,7 +1,6 @@
 [server]
 port = 8080
 host = "0.0.0.0"
-db_path = "data/alfred.db"
 
 [llm]
 default_provider = "openai"
@@ -36,7 +35,7 @@ enabled = true
 
 [memory]
 enabled = true
-vault_path = "/home/user/vaults/Alfred"
+vault_path = "~/alfred"
 mode = "auto"
 cli_check_interval_secs = 300
 retrieval_review_threshold_days = 90

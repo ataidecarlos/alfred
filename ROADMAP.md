@@ -70,6 +70,14 @@
 - Cross-platform support (Linux, macOS, Windows)
 - Automated release pipeline
 
+### Architecture Refactor (v2026.09.17)
+- Message Bus for channel decoupling
+- Session management with legacy migration
+- Agent loop/runner split
+- Workspace management
+- Unified directory structure (`~/.alfred/`)
+- Obsidian-friendly vault structure
+
 ## Contributing
 
 We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.

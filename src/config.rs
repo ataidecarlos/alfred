@@ -117,9 +117,13 @@ fn default_true() -> bool { true }
 fn default_memory_enabled() -> bool { true }
 fn default_vault_path() -> String {
     if cfg!(target_os = "windows") {
-        "C:\\Users\\ataid\\vaults\\Ataide\\Alfred".into()
+        std::env::var("USERPROFILE")
+            .map(|home| format!("{}\\alfred", home))
+            .unwrap_or_else(|_| "C:\\Users\\alfred".into())
     } else {
-        "/home/user/vaults/Alfred".into()
+        std::env::var("HOME")
+            .map(|home| format!("{}/alfred", home))
+            .unwrap_or_else(|_| "/home/user/alfred".into())
     }
 }
 fn default_memory_mode() -> String { "auto".into() }

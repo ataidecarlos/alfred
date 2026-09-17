@@ -15,7 +15,7 @@ import glob
 import os
 import sys
 
-DUMP_DIR = os.path.expanduser("~/.config/alfred/debug")
+DUMP_DIR = os.path.expanduser("~/.alfred/debug")
 ALFRED = os.path.expanduser("~/.local/bin/alfred")
 SERVER_URL = "http://localhost:18081"
 

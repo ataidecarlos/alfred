@@ -3,39 +3,39 @@ use std::path::PathBuf;
 pub struct Paths;
 
 impl Paths {
-    pub fn config_dir() -> PathBuf {
+    /// Root directory: ~/.alfred (or %USERPROFILE%\.alfred on Windows)
+    pub fn home_dir() -> PathBuf {
         if cfg!(target_os = "windows") {
-            dirs().join("alfred")
-        } else {
-            dirs().join("alfred")
-        }
-    }
-
-    pub fn data_dir() -> PathBuf {
-        if cfg!(target_os = "windows") {
-            dirs().join("alfred")
-        } else {
-            // XDG: ~/.local/share/alfred
-            std::env::var("XDG_DATA_HOME")
+            std::env::var("USERPROFILE")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| {
                     let home = std::env::var("HOME")
                         .expect("Cannot determine home directory");
-                    PathBuf::from(home).join(".local").join("share")
+                    PathBuf::from(home)
                 })
-                .join("alfred")
-        }
-    }
-
-    pub fn cache_dir() -> PathBuf {
-        if cfg!(target_os = "windows") {
-            dirs().join("alfred").join("cache")
+                .join(".alfred")
         } else {
-            dirs().join("alfred")
+            let home = std::env::var("HOME")
+                .expect("Cannot determine home directory");
+            PathBuf::from(home).join(".alfred")
         }
     }
 
-    /// Directory for workspace roots.
+    /// Config directory: ~/.alfred/config
+    pub fn config_dir() -> PathBuf {
+        Self::home_dir().join("config")
+    }
+
+    /// Data directory: ~/.alfred/data
+    pub fn data_dir() -> PathBuf {
+        Self::home_dir().join("data")
+    }
+
+    /// Logs directory: ~/.alfred/logs
+    pub fn logs_dir() -> PathBuf {
+        Self::home_dir().join("logs")
+    }
+
     pub fn workspace_dir() -> PathBuf {
         Self::data_dir().join("workspace")
     }
@@ -49,7 +49,7 @@ impl Paths {
     }
 
     pub fn log_file() -> PathBuf {
-        Self::cache_dir().join("server.log")
+        Self::logs_dir().join("server.log")
     }
 
     pub fn prompts_dir() -> PathBuf {
@@ -63,26 +63,8 @@ impl Paths {
     pub fn user_prompt_file() -> PathBuf {
         Self::prompts_dir().join("user.md")
     }
-}
 
-#[cfg(target_os = "windows")]
-fn dirs() -> PathBuf {
-    std::env::var("APPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            let home = std::env::var("USERPROFILE")
-                .expect("Cannot determine home directory");
-            PathBuf::from(home).join("AppData").join("Roaming")
-        })
-}
-
-#[cfg(not(target_os = "windows"))]
-fn dirs() -> PathBuf {
-    std::env::var("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            let home = std::env::var("HOME")
-                .expect("Cannot determine home directory");
-            PathBuf::from(home).join(".config")
-        })
+    pub fn themes_dir() -> PathBuf {
+        Self::config_dir().join("themes")
+    }
 }

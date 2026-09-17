@@ -9,8 +9,12 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALL_DIR="$HOME/.local/bin"
-CONFIG_DIR="$HOME/.config/alfred"
+ALFRED_HOME="$HOME/.alfred"
+CONFIG_DIR="$ALFRED_HOME/config"
 PROMPTS_DIR="$CONFIG_DIR/prompts"
+DATA_DIR="$ALFRED_HOME/data"
+LOG_DIR="$ALFRED_HOME/logs"
+VAULT_DIR="$HOME/alfred"
 BINARY="$INSTALL_DIR/alfred"
 KEY_FILE="$PROJECT_ROOT/test_api_keys.toml"
 
@@ -211,10 +215,15 @@ fi
 
 ok "Configured API key (model: $MODEL)"
 
-# ── Step 8: Set vault path in config ─────────────────────────────────
-VAULT_PATH="$HOME/vaults/Alfred"
-sed -i "s|vault_path = \"/home/user/vaults/Alfred\"|vault_path = \"$VAULT_PATH\"|" "$CONFIG_FILE"
-ok "Vault path: $VAULT_PATH"
+# ── Step 8: Set vault path and create directories ─────────────────────
+mkdir -p "$DATA_DIR"
+mkdir -p "$LOG_DIR"
+mkdir -p "$VAULT_DIR"
+
+sed -i "s|vault_path = \"~/alfred\"|vault_path = \"$VAULT_DIR\"|" "$CONFIG_FILE"
+ok "Vault path: $VAULT_DIR"
+ok "Data dir: $DATA_DIR"
+ok "Logs dir: $LOG_DIR"
 
 # ── Step 9: Verify installation ──────────────────────────────────────
 echo ""

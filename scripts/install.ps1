@@ -25,9 +25,11 @@ $ErrorActionPreference = "Stop"
 $GitHubRepo = "ataidecarlos/alfred"
 $GitHubApi = "https://api.github.com/repos/$GitHubRepo"
 $InstallDir = "$env:LOCALAPPDATA\bin"
-$ConfigDir = "$env:APPDATA\alfred"
-$DataDir = "$env:LOCALAPPDATA\alfred"
-$CacheDir = "$env:LOCALAPPDATA\alfred\cache"
+$AlfredHome = "$env:USERPROFILE\.alfred"
+$ConfigDir = "$AlfredHome\config"
+$DataDir = "$AlfredHome\data"
+$LogDir = "$AlfredHome\logs"
+$VaultDir = "$env:USERPROFILE\alfred"
 
 # Colors
 function Write-Info { Write-Host -ForegroundColor Green "[INFO] $args" }
@@ -212,15 +214,17 @@ function Install-Config {
     }
 }
 
-# Create data directories
+# Create data, logs, and vault directories
 function New-DataDirs {
     Write-Info "Creating data directories..."
 
     New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
-    New-Item -ItemType Directory -Path $CacheDir -Force | Out-Null
+    New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+    New-Item -ItemType Directory -Path $VaultDir -Force | Out-Null
 
     Write-Info "Data directory: $DataDir"
-    Write-Info "Cache directory: $CacheDir"
+    Write-Info "Logs directory: $LogDir"
+    Write-Info "Vault directory: $VaultDir"
 }
 
 # Check PATH

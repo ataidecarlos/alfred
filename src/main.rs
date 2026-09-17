@@ -71,7 +71,8 @@ fn ensure_directories() {
         Paths::config_dir(),
         Paths::prompts_dir(),
         Paths::data_dir(),
-        Paths::cache_dir(),
+        Paths::logs_dir(),
+        Paths::themes_dir(),
     ];
     for dir in &dirs {
         if !dir.exists() {
@@ -137,7 +138,7 @@ fn auto_generate_config_files() {
 #[tokio::main]
 async fn main() {
     // Ensure log directory exists before initializing logging
-    let log_dir = Paths::cache_dir();
+    let log_dir = Paths::logs_dir();
     if !log_dir.exists() {
         let _ = std::fs::create_dir_all(&log_dir);
     }
@@ -242,7 +243,7 @@ async fn run_server_mode(config_path: &Option<String>) {
     println!("  Listening on: {}", addr);
     println!("  Config: {}", Paths::config_file().display());
     println!("  Data: {}", Paths::data_dir().display());
-    println!("  Logs: {}", Paths::cache_dir().display());
+    println!("  Logs: {}", Paths::logs_dir().display());
 
     info!("Alfred initialized. Starting services...");
 

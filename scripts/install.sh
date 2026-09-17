@@ -7,9 +7,11 @@ set -e
 
 ALFRED_VERSION="${1:-latest}"
 INSTALL_DIR="${HOME}/.local/bin"
-CONFIG_DIR="${HOME}/.config/alfred"
-DATA_DIR="${HOME}/.local/share/alfred"
-CACHE_DIR="${HOME}/.cache/alfred"
+ALFRED_HOME="${HOME}/.alfred"
+CONFIG_DIR="${ALFRED_HOME}/config"
+DATA_DIR="${ALFRED_HOME}/data"
+LOG_DIR="${ALFRED_HOME}/logs"
+VAULT_DIR="${HOME}/alfred"
 
 GITHUB_REPO="ataidecarlos/alfred"
 GITHUB_API="https://api.github.com/repos/${GITHUB_REPO}"
@@ -201,15 +203,17 @@ install_config() {
     done
 }
 
-# Create data and cache directories
+# Create data, logs, and vault directories
 create_dirs() {
     log_info "Creating data directories..."
 
     mkdir -p "${DATA_DIR}"
-    mkdir -p "${CACHE_DIR}"
+    mkdir -p "${LOG_DIR}"
+    mkdir -p "${VAULT_DIR}"
 
     log_info "Data directory: ${DATA_DIR}"
-    log_info "Cache directory: ${CACHE_DIR}"
+    log_info "Logs directory: ${LOG_DIR}"
+    log_info "Vault directory: ${VAULT_DIR}"
 }
 
 # Check PATH

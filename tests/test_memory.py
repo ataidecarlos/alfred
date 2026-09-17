@@ -84,33 +84,28 @@ class TestVaultScaffolding:
         vault = server["vault_path"]
 
         expected_dirs = [
-            "_templates", "_attachments", "_config",
-            "inbox", "preferences", "facts", "decisions",
-            "lessons", "action-items", "daily",
+            "people", "memory", "memory/inbox", "todo",
         ]
         for d in expected_dirs:
             assert (vault / d).exists(), f"Directory {d} not found in vault"
 
-    def test_vault_templates_exist(self, server):
-        """Verify vault templates were created."""
+    def test_vault_files_exist(self, server):
+        """Verify vault files were created."""
         vault = server["vault_path"]
 
         expected_files = [
-            "_templates/memory.md",
-            "_templates/decision.md",
-            "_templates/moc.md",
-            "_config/topics.md",
-            "index.md",
-            "alfred-index.base",
+            "README.md",
+            "memories.md",
+            "todo/todo.md",
         ]
         for f in expected_files:
             assert (vault / f).exists(), f"File {f} not found in vault"
 
-    def test_vault_index_content(self, server):
-        """Verify vault index.md has correct content."""
+    def test_vault_readme_content(self, server):
+        """Verify vault README.md has correct content."""
         vault = server["vault_path"]
-        index_content = (vault / "index.md").read_text()
+        readme_content = (vault / "README.md").read_text()
 
-        assert "Alfred Memory Vault" in index_content
-        assert "preferences" in index_content
-        assert "facts" in index_content
+        assert "Alfred Memory Vault" in readme_content
+        assert "people" in readme_content
+        assert "memory" in readme_content

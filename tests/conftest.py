@@ -42,14 +42,11 @@ def find_alfred_binary() -> Path:
 def find_database_path() -> Path:
     """Find the actual database path Alfred uses (Paths::database_file())."""
     if sys.platform == "win32":
-        appdata = os.environ.get("APPDATA", "")
-        return Path(appdata) / "alfred" / "alfred.db"
+        home = os.environ.get("USERPROFILE", "")
+        return Path(home) / ".alfred" / "data" / "alfred.db"
     else:
-        xdg = os.environ.get("XDG_CONFIG_HOME", "")
-        if xdg:
-            return Path(xdg) / "alfred" / "alfred.db"
         home = os.environ.get("HOME", "")
-        return Path(home) / ".config" / "alfred" / "alfred.db"
+        return Path(home) / ".alfred" / "data" / "alfred.db"
 
 
 def find_api_key() -> str:
