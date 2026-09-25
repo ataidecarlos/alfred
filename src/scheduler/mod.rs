@@ -1,3 +1,5 @@
+pub mod control;
+
 use tokio_cron_scheduler::{Job, JobScheduler};
 use tracing::{info, error};
 

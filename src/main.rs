@@ -75,6 +75,35 @@ enum CliCommand {
     /// Work item management
     #[command(name = "workitem")]
     WorkItem(WorkItemArgs),
+    /// Scheduled task management (OS cron / Task Scheduler)
+    #[command(name = "scheduler")]
+    Scheduler(SchedulerArgs),
+}
+
+#[derive(Parser)]
+struct SchedulerArgs {
+    #[command(subcommand)]
+    command: SchedulerCommand,
+}
+
+#[derive(Parser)]
+enum SchedulerCommand {
+    /// List scheduled jobs
+    List,
+    /// Add a scheduled job
+    Add {
+        /// Cron schedule, e.g. "*/5 * * * *" or "@daily"
+        schedule: String,
+        /// Command to run
+        command: String,
+    },
+    /// Remove a scheduled job
+    Remove {
+        /// Cron schedule of the job to remove
+        schedule: String,
+        /// Command of the job to remove
+        command: String,
+    },
 }
 
 #[derive(Parser)]
@@ -269,8 +298,15 @@ async fn main() {
         return;
     }
 
-    if let Some(CliCommand::WorkItem(workitem_args)) = cli.command {
-        run_workitem_command(workitem_args.command, &cli.config).await;
+    if let Some(command) = cli.command {
+        match command {
+            CliCommand::WorkItem(workitem_args) => {
+                run_workitem_command(workitem_args.command, &cli.config).await
+            }
+            CliCommand::Scheduler(scheduler_args) => {
+                run_scheduler_command(scheduler_args.command)
+            }
+        }
         return;
     }
 
@@ -721,6 +757,40 @@ async fn run_workitem_command(cmd: WorkItemCommand, config_path: &Option<String>
                 }
                 Err(e) => {
                     error!("Failed to log progress: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+}
+
+fn run_scheduler_command(cmd: SchedulerCommand) {
+    match cmd {
+        SchedulerCommand::List => match scheduler::control::list_jobs() {
+            Ok(jobs) => print!("{}", scheduler::control::format_jobs(&jobs)),
+            Err(e) => {
+                error!("Failed to list scheduled jobs: {}", e);
+                eprintln!("ERROR: {}", e);
+                std::process::exit(1);
+            }
+        },
+        SchedulerCommand::Add { schedule, command } => {
+            match scheduler::control::add_job(&schedule, &command) {
+                Ok(entry) => println!("Scheduled job added: {}", entry.to_line()),
+                Err(e) => {
+                    error!("Failed to add scheduled job: {}", e);
+                    eprintln!("ERROR: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        SchedulerCommand::Remove { schedule, command } => {
+            match scheduler::control::remove_job(&schedule, &command) {
+                Ok(true) => println!("Scheduled job removed: {} {}", schedule, command),
+                Ok(false) => println!("No matching scheduled job found."),
+                Err(e) => {
+                    error!("Failed to remove scheduled job: {}", e);
+                    eprintln!("ERROR: {}", e);
                     std::process::exit(1);
                 }
             }
