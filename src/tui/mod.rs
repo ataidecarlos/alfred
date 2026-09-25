@@ -18,8 +18,12 @@ use ratatui::{
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
+pub mod control;
 pub mod theme;
+use control::{ChannelStatus, ControlAction, ControlCenter, ControlData, SchedulerJob, TodoEntry};
 use theme::Theme;
+
+use crate::scheduler;
 
 // ── Chat Message Types ──────────────────────────────────────────────
 
@@ -154,6 +158,8 @@ pub struct TuiApp {
     should_quit: bool,
     response_rx: Option<mpsc::Receiver<String>>,
     command_palette: CommandPalette,
+    control_center: ControlCenter,
+    control_rx: Option<mpsc::Receiver<ControlData>>,
     dump_message: Option<String>,
     theme: Theme,
 }
@@ -164,7 +170,7 @@ impl TuiApp {
         let theme = Theme::load("dark").unwrap_or_else(|_| Theme::default_dark());
         Self {
             messages: vec![ChatMessage::System {
-                text: "Welcome to Alfred! Type a message to start. Press Ctrl+P for commands.".into(),
+                text: "Welcome to Alfred! Type a message to start. Ctrl+P commands · Ctrl+K control center.".into(),
             }],
             input: String::new(),
             cursor_position: 0,
@@ -174,6 +180,8 @@ impl TuiApp {
             should_quit: false,
             response_rx: None,
             command_palette: CommandPalette::new(),
+            control_center: ControlCenter::new(),
+            control_rx: None,
             dump_message: None,
             theme,
         }
@@ -228,9 +236,21 @@ impl TuiApp {
                 self.response_rx = None;
             }
         }
+
+        if let Some(rx) = &mut self.control_rx {
+            if let Ok(data) = rx.try_recv() {
+                self.control_center.set_jobs(data.jobs);
+                self.control_center.set_todos(data.todos);
+                self.control_center.set_memory_count(data.memory_count);
+                self.control_center.set_channels(data.channels);
+                self.control_center.set_status("Updated");
+                self.control_rx = None;
+            }
+        }
     }
 
-    fn handle_key_event(&mut self, key: KeyEvent) {
+    /// Handle a key event. Public so dump tooling and tests can drive the UI.
+    pub fn handle_key_event(&mut self, key: KeyEvent) {
         if self.command_palette.visible {
             match key.code {
                 KeyCode::Esc | KeyCode::Char('p') if key.modifiers == KeyModifiers::CONTROL => {
@@ -257,9 +277,17 @@ impl TuiApp {
             return;
         }
 
+        if self.control_center.is_visible() {
+            self.handle_control_key(key);
+            return;
+        }
+
         match key.code {
             KeyCode::Char('p') if key.modifiers == KeyModifiers::CONTROL => {
                 self.command_palette.toggle();
+            }
+            KeyCode::Char('k') if key.modifiers == KeyModifiers::CONTROL => {
+                self.toggle_control_center();
             }
             KeyCode::Char('q') if key.modifiers == KeyModifiers::CONTROL => {
                 self.should_quit = true;
@@ -324,7 +352,7 @@ impl TuiApp {
             }
             CommandAction::ShowHelp => {
                 self.messages.push(ChatMessage::System {
-                    text: "Commands:\n  /clear        Clear chat\n  /help         This help\n  /todos        List todos\n  /memories     List memories\n  /dump         Save screen\n  /theme-dark   Dark theme\n  /theme-light  Light theme\n  /config       Show config\n  /quit         Exit".into(),
+                    text: "Commands:\n  /clear        Clear chat\n  /help         This help\n  /todos        List todos\n  /memories     List memories\n  /dump         Save screen\n  /theme-dark   Dark theme\n  /theme-light  Light theme\n  /config       Show config\n  /quit         Exit\n\n  Ctrl+K        Open the control center".into(),
                 });
             }
             CommandAction::SwitchTheme(name) => {
@@ -390,6 +418,193 @@ impl TuiApp {
             }
             CommandAction::Quit => self.should_quit = true,
         }
+    }
+
+    // ── Control Center ──────────────────────────────────────────────
+
+    /// Borrow the control center (used by tests and dump tooling).
+    pub fn control_center(&self) -> &ControlCenter {
+        &self.control_center
+    }
+
+    /// Mutably borrow the control center (used by tests and dump tooling).
+    pub fn control_center_mut(&mut self) -> &mut ControlCenter {
+        &mut self.control_center
+    }
+
+    /// Seed the channel list shown in the control center. The API channel is
+    /// refreshed against `/health` on every refresh.
+    pub fn set_channels(&mut self, channels: Vec<ChannelStatus>) {
+        self.control_center.set_channels(channels);
+    }
+
+    /// Open/close the control center (Ctrl+K).
+    pub fn toggle_control_center(&mut self) {
+        if self.control_center.is_visible() {
+            self.control_center.close();
+        } else {
+            self.control_center.open();
+            self.refresh_control_data();
+        }
+    }
+
+    fn handle_control_key(&mut self, key: KeyEvent) {
+        let editing = self.control_center.is_editing();
+        match key.code {
+            KeyCode::Esc => {
+                if editing {
+                    self.control_center.cancel_edit();
+                } else if self.control_center.detail().is_some() {
+                    self.control_center.close_detail();
+                } else {
+                    self.control_center.close();
+                }
+            }
+            KeyCode::Char('k') if key.modifiers == KeyModifiers::CONTROL => {
+                self.control_center.close();
+            }
+            KeyCode::Char('p') if key.modifiers == KeyModifiers::CONTROL => {
+                self.control_center.close();
+                self.command_palette.toggle();
+            }
+            KeyCode::Left => self.control_center.prev_section(),
+            KeyCode::Right => self.control_center.next_section(),
+            KeyCode::Up => self.control_center.move_up(),
+            KeyCode::Down => self.control_center.move_down(),
+            KeyCode::Enter => {
+                let action = if editing {
+                    self.control_center.commit_edit()
+                } else {
+                    self.control_center.activate()
+                };
+                self.apply_control_action(action);
+            }
+            KeyCode::Char('e') if !editing => {
+                self.control_center.begin_edit();
+            }
+            KeyCode::Backspace => self.control_center.pop_edit_char(),
+            KeyCode::Char(c) if editing => self.control_center.push_edit_char(c),
+            KeyCode::Char('r') if !editing => self.refresh_control_data(),
+            _ => {}
+        }
+    }
+
+    fn apply_control_action(&mut self, action: ControlAction) {
+        match action {
+            ControlAction::None | ControlAction::OpenTodo { .. } => {}
+            ControlAction::SaveTodo { id, title } => {
+                let server_url = self.server_url.clone();
+                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                    handle.spawn(async move {
+                        let client = reqwest::Client::new();
+                        let _ = client
+                            .put(format!("{}/api/todos/{}", server_url, id))
+                            .json(&serde_json::json!({ "title": title }))
+                            .send()
+                            .await;
+                    });
+                }
+            }
+            ControlAction::ToggleScheduler {
+                schedule,
+                command,
+                enabled,
+            } => {
+                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                    let job = scheduler::control::ManagedJob::new(
+                        scheduler::control::CronEntry::new(schedule, command),
+                        enabled,
+                    );
+                    handle.spawn_blocking(move || {
+                        if let Err(e) = scheduler::control::set_job_enabled(&job, enabled) {
+                            tracing::warn!("Failed to toggle scheduled job: {}", e);
+                        }
+                    });
+                }
+            }
+        }
+    }
+
+    /// Fetch todos, memories and scheduler jobs for the control center.
+    /// Safe to call without a Tokio runtime (it becomes a no-op).
+    fn refresh_control_data(&mut self) {
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let server_url = self.server_url.clone();
+        let seed_channels = self.control_center.channels().to_vec();
+        let (tx, rx) = mpsc::channel::<ControlData>(1);
+        self.control_rx = Some(rx);
+        self.control_center.set_status("Refreshing...");
+
+        handle.spawn(async move {
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(5))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new());
+
+            let todos = match client.get(format!("{}/api/todos", server_url)).send().await {
+                Ok(resp) => resp
+                    .json::<Vec<serde_json::Value>>()
+                    .await
+                    .map(|items| {
+                        items
+                            .into_iter()
+                            .filter_map(|t| {
+                                Some(TodoEntry::new(
+                                    t["id"].as_str()?.to_string(),
+                                    t["title"].as_str()?.to_string(),
+                                    t["priority"].as_str().unwrap_or("medium").to_string(),
+                                    t["completed"].as_bool().unwrap_or(false),
+                                ))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                Err(_) => Vec::new(),
+            };
+
+            let memory_count = match client.get(format!("{}/api/memories", server_url)).send().await
+            {
+                Ok(resp) => resp
+                    .json::<Vec<serde_json::Value>>()
+                    .await
+                    .map(|items| items.len())
+                    .unwrap_or(0),
+                Err(_) => 0,
+            };
+
+            let jobs: Vec<SchedulerJob> = tokio::task::spawn_blocking(|| {
+                scheduler::control::list_managed_jobs().unwrap_or_default()
+            })
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|j| SchedulerJob::new(j.schedule, j.command, j.enabled))
+            .collect();
+
+            let healthy = client
+                .get(format!("{}/health", server_url))
+                .send()
+                .await
+                .map(|resp| resp.status().is_success())
+                .unwrap_or(false);
+            let mut channels = seed_channels;
+            if channels.is_empty() {
+                channels.push(ChannelStatus::new("api", healthy));
+            } else if let Some(api) = channels.iter_mut().find(|c| c.name == "api") {
+                api.connected = healthy;
+            }
+
+            let _ = tx
+                .send(ControlData {
+                    todos,
+                    memory_count,
+                    jobs,
+                    channels,
+                })
+                .await;
+        });
     }
 
     /// Append a chat message (used by dump tooling and tests).
@@ -693,7 +908,7 @@ fn render_frame(app: &mut TuiApp, f: &mut ratatui::Frame) {
             .style(Style::default().bg(app.theme.background)));
     f.render_widget(input, chunks[1]);
 
-    if !app.is_loading && !app.command_palette.visible {
+    if !app.is_loading && !app.command_palette.visible && !app.control_center.is_visible() {
         // Input block has no borders/title, so text sits on the first row.
         let cursor_x = chunks[1].x + 2 + app.cursor_position as u16;
         let cursor_y = chunks[1].y;
@@ -704,12 +919,22 @@ fn render_frame(app: &mut TuiApp, f: &mut ratatui::Frame) {
 
     if app.command_palette.visible {
         render_command_palette(&mut *app, f);
+    } else if app.control_center.is_visible() {
+        control::render_control_center(&mut *app, f);
     }
 }
 
 // ── Main Run Function ───────────────────────────────────────────────
 
 pub async fn run(server_url: String) -> Result<(), Box<dyn std::error::Error>> {
+    run_with_channels(server_url, Vec::new()).await
+}
+
+/// Like [`run`] but seeds the control center's channel list from config.
+pub async fn run_with_channels(
+    server_url: String,
+    channels: Vec<ChannelStatus>,
+) -> Result<(), Box<dyn std::error::Error>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -717,6 +942,7 @@ pub async fn run(server_url: String) -> Result<(), Box<dyn std::error::Error>> {
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = TuiApp::new(server_url);
+    app.set_channels(channels);
     let tick_rate = Duration::from_millis(100);
 
     loop {

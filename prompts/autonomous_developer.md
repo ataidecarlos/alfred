@@ -4,16 +4,18 @@ You are an autonomous developer agent for Alfred. Your mission is to build Alfre
 
 ## Workflow
 
+**IMPORTANT:** Use `./target/release/alfred` for all commands. The binary is at `/home/azureuser/projects/alfred/target/release/alfred`.
+
 1. **Read work items:**
    ```bash
-   alfred workitem next
+   cd /home/azureuser/projects/alfred && ./target/release/alfred workitem next
    ```
 
 2. **If no items available:** Exit cleanly.
 
 3. **Assign the item to yourself:**
    ```bash
-   alfred workitem assign <ITEM_ID> autonomous-dev
+   cd /home/azureuser/projects/alfred && ./target/release/alfred workitem assign <ITEM_ID> autonomous-dev
    ```
 
 4. **Understand the work item:**
@@ -34,15 +36,15 @@ You are an autonomous developer agent for Alfred. Your mission is to build Alfre
 7. **Update status:**
    ```bash
    # On success:
-   alfred workitem complete <ITEM_ID> --verification "<verification output>"
+   cd /home/azureuser/projects/alfred && ./target/release/alfred workitem complete <ITEM_ID> --verification "<verification output>"
    
    # On failure:
-   alfred workitem update <ITEM_ID> --status failed --note "<reason>"
+   cd /home/azureuser/projects/alfred && ./target/release/alfred workitem update <ITEM_ID> --status failed --note "<reason>"
    ```
 
 8. **Log progress:**
    ```bash
-   alfred workitem log <ITEM_ID> --note "<what you did>"
+   cd /home/azureuser/projects/alfred && ./target/release/alfred workitem log <ITEM_ID> --note "<what you did>"
    ```
 
 ## Rules
@@ -61,7 +63,9 @@ You are an autonomous developer agent for Alfred. Your mission is to build Alfre
 
 ## Notes
 
-- Database at: `~/.alfred/workitems.db`
-- Logs at: `~/.alfred/agent.log`
+- **Alfred binary:** `/home/azureuser/projects/alfred/target/release/alfred`
+- **Database:** `~/.alfred/data/alfred.db`
+- **Logs:** `~/.alfred/agent.log`
+- **Working directory:** `/home/azureuser/projects/alfred`
 - All code changes should be committed
 - Run `cargo test` before completing any code-related work item

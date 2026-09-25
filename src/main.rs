@@ -1,21 +1,7 @@
-mod agent;
-mod bus;
-mod config;
-mod connectors;
-mod error;
-mod llm;
-mod memory;
-mod paths;
-mod prompt;
-mod scheduler;
-mod server;
-mod session;
-mod store;
-mod tools;
-mod tui;
-mod types;
-mod workitem;
-mod workspace;
+use alfred::{
+    agent, config, connectors, llm, memory, paths, prompt, scheduler, server, store, tools, tui,
+    types, workitem,
+};
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
@@ -445,7 +431,7 @@ async fn initialize_state(config: &config::AppConfig) -> Result<AppState, Box<dy
 
     let tools = Arc::new(register_builtins(store.clone()));
     let (event_tx, _) = tokio::sync::broadcast::channel(256);
-    let bus = Arc::new(crate::bus::MessageBus::new(256));
+    let bus = Arc::new(alfred::bus::MessageBus::new(256));
 
     Ok(AppState {
         store,
@@ -603,7 +589,17 @@ async fn run_tui_mode(config_path: &Option<String>) {
         println!("Connecting to running server at {}", server_url);
     }
 
-    if let Err(e) = tui::run(server_url).await {
+    // Channels shown in the TUI control center. The API channel is always
+    // present; Telegram is listed when configured.
+    let mut channels = vec![tui::control::ChannelStatus::new("api", true)];
+    if let Some(tg) = &config.telegram {
+        channels.push(tui::control::ChannelStatus::new(
+            "telegram",
+            tg.bot_token.is_some(),
+        ));
+    }
+
+    if let Err(e) = tui::run_with_channels(server_url, channels).await {
         error!("TUI error: {}", e);
         std::process::exit(1);
     }

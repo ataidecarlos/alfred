@@ -210,6 +210,116 @@ pub fn remove_job(schedule: &str, command: &str) -> Result<bool, AlfredError> {
     }
 }
 
+/// A scheduled job plus whether it is currently enabled.
+///
+/// Disabled jobs are removed from the OS scheduler and remembered in a local
+/// manifest so the control center can list and re-enable them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManagedJob {
+    pub schedule: String,
+    pub command: String,
+    pub enabled: bool,
+}
+
+impl ManagedJob {
+    pub fn new(entry: CronEntry, enabled: bool) -> Self {
+        Self {
+            schedule: entry.schedule,
+            command: entry.command,
+            enabled,
+        }
+    }
+
+    pub fn entry(&self) -> CronEntry {
+        CronEntry::new(&self.schedule, &self.command)
+    }
+}
+
+/// Path of the manifest recording jobs that were disabled (toggled off).
+fn disabled_manifest_path() -> std::path::PathBuf {
+    crate::paths::Paths::data_dir().join("disabled_jobs.json")
+}
+
+fn load_disabled() -> Vec<CronEntry> {
+    match std::fs::read_to_string(disabled_manifest_path()) {
+        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+        Err(_) => Vec::new(),
+    }
+}
+
+fn save_disabled(entries: &[CronEntry]) -> Result<(), AlfredError> {
+    let path = disabled_manifest_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = serde_json::to_string_pretty(entries)
+        .map_err(|e| AlfredError::Scheduler(e.to_string()))?;
+    std::fs::write(path, content)?;
+    Ok(())
+}
+
+/// Merge enabled (active) and disabled entries into one list. Active jobs keep
+/// their OS order; disabled jobs are appended, skipping duplicates.
+pub fn merge_managed(active: Vec<CronEntry>, disabled: Vec<CronEntry>) -> Vec<ManagedJob> {
+    let mut jobs: Vec<ManagedJob> = active
+        .into_iter()
+        .map(|entry| ManagedJob::new(entry, true))
+        .collect();
+    for entry in disabled {
+        let normalized = entry.normalized();
+        if !jobs.iter().any(|job| job.entry().normalized() == normalized) {
+            jobs.push(ManagedJob::new(entry, false));
+        }
+    }
+    jobs
+}
+
+/// Add `entry` to the disabled manifest, avoiding duplicates.
+pub fn mark_disabled(disabled: &[CronEntry], entry: &CronEntry) -> Vec<CronEntry> {
+    let normalized = entry.normalized();
+    let mut result: Vec<CronEntry> = disabled
+        .iter()
+        .filter(|existing| existing.normalized() != normalized)
+        .cloned()
+        .collect();
+    result.push(entry.clone());
+    result
+}
+
+/// Remove `entry` from the disabled manifest.
+pub fn mark_enabled(disabled: &[CronEntry], entry: &CronEntry) -> Vec<CronEntry> {
+    let normalized = entry.normalized();
+    disabled
+        .iter()
+        .filter(|existing| existing.normalized() != normalized)
+        .cloned()
+        .collect()
+}
+
+/// List every managed job: enabled ones from the OS scheduler plus disabled
+/// ones remembered in the local manifest.
+pub fn list_managed_jobs() -> Result<Vec<ManagedJob>, AlfredError> {
+    let active = list_jobs()?;
+    let disabled = load_disabled();
+    Ok(merge_managed(active, disabled))
+}
+
+/// Enable or disable a job. Disabling removes it from the OS scheduler and
+/// records it in the manifest; enabling does the reverse.
+pub fn set_job_enabled(job: &ManagedJob, enabled: bool) -> Result<(), AlfredError> {
+    let entry = job.entry();
+    if enabled {
+        add_job(&entry.schedule, &entry.command)?;
+        let disabled = load_disabled();
+        save_disabled(&mark_enabled(&disabled, &entry))?;
+    } else {
+        remove_job(&entry.schedule, &entry.command)?;
+        let disabled = load_disabled();
+        save_disabled(&mark_disabled(&disabled, &entry))?;
+    }
+    Ok(())
+}
+
 /// Unix backend backed by the user crontab.
 mod unix {
     use super::*;
