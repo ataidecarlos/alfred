@@ -87,6 +87,7 @@ pub async fn send_message(
         tools: state.tools.clone(),
         event_tx,
         max_turns: 10,
+        laya: crate::laya::LayaModel::default(),
     };
 
     run_agent_loop(&mut ctx).await;

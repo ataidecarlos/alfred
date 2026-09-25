@@ -24,6 +24,7 @@ pub struct AgentLoop {
     session_manager: Arc<SessionManager>,
     system_prompt: String,
     event_tx: broadcast::Sender<AgentEvent>,
+    laya: crate::laya::LayaModel,
 }
 
 impl AgentLoop {
@@ -33,7 +34,13 @@ impl AgentLoop {
         system_prompt: String,
         event_tx: broadcast::Sender<AgentEvent>,
     ) -> Self {
-        Self { runner, session_manager, system_prompt, event_tx }
+        Self {
+            runner,
+            session_manager,
+            system_prompt,
+            event_tx,
+            laya: crate::laya::LayaModel::default(),
+        }
     }
 
     /// Handle an inbound message: resolve session, run agent, save, return reply.
@@ -60,15 +67,18 @@ impl AgentLoop {
         });
         session.messages.push(user_msg);
 
-        // Run the agent
+        // Run the agent. Laya handles high-confidence requests directly and
+        // delegates everything else to the LLM runner.
         let _ = self.event_tx.send(AgentEvent::AgentStart);
-        let result = self.runner.run(&self.system_prompt, session.messages).await;
+        if let Some(reply) = crate::laya::direct_reply(&self.laya, &session.messages) {
+            session.messages.push(reply);
+        } else {
+            let result = self.runner.run(&self.system_prompt, session.messages).await;
+            session.messages = result.messages;
+        }
         let _ = self.event_tx.send(AgentEvent::AgentEnd {
-            messages: result.messages.clone(),
+            messages: session.messages.clone(),
         });
-
-        // Update session with new messages
-        session.messages = result.messages;
 
         // Save session
         if let Err(e) = self.session_manager.save(&session) {
@@ -102,10 +112,22 @@ pub struct AgentLoopContext {
     pub tools: Arc<ToolRegistry>,
     pub event_tx: broadcast::Sender<AgentEvent>,
     pub max_turns: u32,
+    pub laya: crate::laya::LayaModel,
 }
 
 /// Legacy function for backward compatibility. New code should use AgentLoop.
 pub async fn run_agent_loop(ctx: &mut AgentLoopContext) -> Vec<Message> {
+    let _ = ctx.event_tx.send(AgentEvent::AgentStart);
+
+    // Laya decision layer: execute high-confidence requests directly.
+    if let Some(reply) = crate::laya::direct_reply(&ctx.laya, &ctx.messages) {
+        ctx.messages.push(reply);
+        let _ = ctx.event_tx.send(AgentEvent::AgentEnd {
+            messages: ctx.messages.clone(),
+        });
+        return ctx.messages.clone();
+    }
+
     let runner = AgentRunner {
         provider: ctx.provider.clone(),
         model: ctx.model.clone(),
@@ -113,7 +135,6 @@ pub async fn run_agent_loop(ctx: &mut AgentLoopContext) -> Vec<Message> {
         max_turns: ctx.max_turns,
     };
 
-    let _ = ctx.event_tx.send(AgentEvent::AgentStart);
     let result = runner.run(&ctx.system_prompt, ctx.messages.clone()).await;
     let _ = ctx.event_tx.send(AgentEvent::AgentEnd {
         messages: result.messages.clone(),
@@ -219,6 +240,7 @@ mod tests {
             tools: Arc::new(tools),
             event_tx,
             max_turns: 5,
+            laya: crate::laya::LayaModel::default(),
         };
 
         let messages = run_agent_loop(&mut ctx).await;

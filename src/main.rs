@@ -533,6 +533,7 @@ async fn run_dump_mode(
             tools: state.tools.clone(),
             event_tx: state.event_tx.clone(),
             max_turns: 10,
+            laya: alfred::laya::LayaModel::default(),
         };
         agent::run_agent_loop(&mut ctx).await;
         history = ctx.messages.clone();

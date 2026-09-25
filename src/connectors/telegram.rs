@@ -182,6 +182,7 @@ impl TelegramConnector {
             tools: self.state.tools.clone(),
             event_tx,
             max_turns: 5,
+            laya: crate::laya::LayaModel::default(),
         };
 
         run_agent_loop(&mut ctx).await;

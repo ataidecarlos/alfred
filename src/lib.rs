@@ -10,6 +10,7 @@ pub mod config;
 pub mod config_watch;
 pub mod connectors;
 pub mod error;
+pub mod laya;
 pub mod llm;
 pub mod memory;
 pub mod paths;

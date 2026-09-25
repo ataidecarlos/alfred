@@ -56,6 +56,7 @@ async fn run_scheduled_prompt(state: &AppState, prompt: &str) -> Result<(), Alfr
         tools: state.tools.clone(),
         event_tx,
         max_turns: 5,
+        laya: crate::laya::LayaModel::default(),
     };
 
     run_agent_loop(&mut ctx).await;
