@@ -3,7 +3,16 @@ port = 8080
 host = "0.0.0.0"
 
 [llm]
-default_provider = "openai"
+# OpenCode Go is the default: OpenAI-compatible and billed through the Zen
+# gateway. Swap model below for a different OpenCode Go model if needed
+# (see https://opencode.ai/zen for the catalog).
+default_provider = "opencode-go"
+
+[llm.providers.opencode-go]
+api_key = "${OPENCODE_GO_API_KEY}"
+# Cheapest available model on OpenCode Go (free tier).
+model = "space-bunny-free"
+base_url = "https://opencode.ai/zen/go/v1"
 
 [llm.providers.openai]
 api_key = "${OPENAI_API_KEY}"

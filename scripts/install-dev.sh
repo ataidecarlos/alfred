@@ -196,19 +196,17 @@ fi
 # Extract first model from preference_order
 MODEL=$(grep -A 1 'preference_order' "$KEY_FILE" | grep '"' | head -1 | sed 's/.*"\(.*\)".*/\1/')
 if [ -z "$MODEL" ]; then
-    MODEL="union-alpha"
+    MODEL="space-bunny-free"
 fi
 
 # Update config.toml
 CONFIG_FILE="$CONFIG_DIR/config.toml"
 
-# Replace api_key
-sed -i "s|api_key = \"\${OPENAI_API_KEY}\"|api_key = \"$API_KEY\"|" "$CONFIG_FILE"
+# Inject the OpenCode Go key/model into the default provider block.
+sed -i "s|api_key = \"\${OPENCODE_GO_API_KEY}\"|api_key = \"$API_KEY\"|" "$CONFIG_FILE"
+sed -i "s|model = \"space-bunny-free\"|model = \"$MODEL\"|" "$CONFIG_FILE"
 
-# Replace model
-sed -i "s|model = \"gpt-4o\"|model = \"$MODEL\"|" "$CONFIG_FILE"
-
-# Add base_url after the model line if not present
+# Ensure the OpenCode Go base_url is present even if the template drifts.
 if ! grep -q "base_url.*opencode.ai" "$CONFIG_FILE"; then
     sed -i "/^model = \"$MODEL\"$/a base_url = \"https://opencode.ai/zen/go/v1\"" "$CONFIG_FILE"
 fi

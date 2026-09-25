@@ -39,11 +39,12 @@ Add your API keys:
 
 ```toml
 [llm]
-default_provider = "openai"
+default_provider = "opencode-go"
 
-[llm.providers.openai]
-api_key = "your-api-key-here"
-model = "gpt-4o"
+[llm.providers.opencode-go]
+api_key = "your-opencode-go-key-here"
+model = "space-bunny-free"
+base_url = "https://opencode.ai/zen/go/v1"
 ```
 
 ## Usage
@@ -141,6 +142,7 @@ See [WORKITEMS.md](WORKITEMS.md) for full documentation.
 
 | Provider | Model Example | Base URL |
 |----------|---------------|----------|
+| OpenCode Go | space-bunny-free | https://opencode.ai/zen/go/v1 |
 | OpenAI | gpt-4o | https://api.openai.com/v1 |
 | Anthropic | claude-sonnet-4-20250514 | https://api.anthropic.com |
 | Google | gemini-2.0-flash | https://generativelanguage.googleapis.com |

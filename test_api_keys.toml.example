@@ -14,48 +14,53 @@
 api_key = ""
 base_url = "https://opencode.ai/zen/go/v1"
 
-# Model preference order (cheapest first, exhaust before moving to next)
-# 1. Union Alpha              - ∞ req/5h, ∞ limit      (free, limited time)
-# 2. Muse Spark 1.2 Contributor - 45,300 req/5h, $60 limit
-# 3. Muse Spark 1.3 Contributor - 45,300 req/5h, $60 limit
-# 4. MiMo-V2.5                - 30,100 req/5h, $60 limit
-# 5. DeepSeek V4.1 Flash      - 26,000 req/5h, $60 limit (4x usage, new)
-# 6. DeepSeek V4 Flash        - 13,000 req/5h, $30 limit
-# 7. LongCat-2.0              - 11,400 req/5h, $60 limit
-# 8. DeepSeek V4 Flash Vision Exp - 6,500 req/5h, $15 limit
-# 9. GLM-5.3-Flash            - 6,320 req/5h, $60 limit
-# 10. Qwen3.8 Flash           - 5,400 req/5h, $30 limit
-# 11. Hy3                     - 4,300 req/5h, $60 limit
-# 12. Qwen3.7 Plus            - 4,300 req/5h, $60 limit
-# 13. MiniMax M2.7            - 3,400 req/5h, $60 limit
-# 14. Qwen3.6 Plus            - 3,300 req/5h, $60 limit
-# 15. MiMo-V2.5-Pro           - 3,250 req/5h, $15 limit
-# 16. MiniMax M3              - 3,200 req/5h, $60 limit
-# 17. GPT 5.6 Luna            - 2,050 req/5h, $15 limit
-# 18. Hy4 preview             - 1,350 req/5h, $30 limit
-# 19. Kimi K2.7 Code          - 1,350 req/5h, $60 limit
-# 20. Kimi K2.6               - 1,150 req/5h, $60 limit
+# Model preference order (cheapest first, exhaust before moving to next).
+# Prices are USD per 1M tokens (input/output) from the OpenCode Go catalog.
+#  1. space-bunny-free            - 0 / 0          (free)
+#  2. muse-spark-1.3-contributor  - 0.10 / 0.20
+#  3. gpt-6-luna                  - 0.10 / 0.50
+#  4. mimo-v2.5                   - 0.14 / 0.28
+#  5. qwen3.8-flash               - 0.15 / 0.47
+#  6. glm-5.3-flash               - 0.15 / 0.50
+#  7. deepseek-v4.1-flash         - 0.15 / 0.60
+#  8. longcat-2.0                 - 0.30 / 1.20
+#  9. minimax-m3                  - 0.30 / 1.20
+# 10. minimax-m2.7               - 0.30 / 1.20
+# 11. qwen3.7-plus               - 0.40 / 1.60
+# 12. mimo-v2.5-pro              - 0.435 / 0.87
+# 13. mimo-v2.6-pro              - 0.435 / 0.87
+# 14. qwen3.6-plus               - 0.50 / 3.00
+# 15. deepseek-v4-pro            - 0.66 / 1.98
+# 16. hy4-preview                - 0.834 / 2.501
+# 17. kimi-k2.7-code             - 0.95 / 4.00
+# 18. glm-5.3                    - 1.40 / 4.40
+# 19. grok-4.7                   - 2.00 / 6.00
+# 20. qwen3.8-max                - 2.00 / 6.00
+# 21. qwen3.7-max                - 2.50 / 7.50
+# 22. kimi-k3                    - 3.00 / 15.00
 
 [opencode_go.models]
 preference_order = [
-    "union-alpha",
-    "muse-spark-1.2-contributor",
+    "space-bunny-free",
     "muse-spark-1.3-contributor",
+    "gpt-6-luna",
     "mimo-v2.5",
-    "deepseek-v4.1-flash",
-    "deepseek-v4-flash",
-    "longcat-2.0",
-    "deepseek-v4-flash-vision-exp",
-    "glm-5.3-flash",
     "qwen3.8-flash",
-    "hy3",
-    "qwen3.7-plus",
-    "minimax-m2.7",
-    "qwen3.6-plus",
-    "mimo-v2.5-pro",
+    "glm-5.3-flash",
+    "deepseek-v4.1-flash",
+    "longcat-2.0",
     "minimax-m3",
-    "gpt-5.6-luna",
+    "minimax-m2.7",
+    "qwen3.7-plus",
+    "mimo-v2.5-pro",
+    "mimo-v2.6-pro",
+    "qwen3.6-plus",
+    "deepseek-v4-pro",
     "hy4-preview",
     "kimi-k2.7-code",
-    "kimi-k2.6"
+    "glm-5.3",
+    "grok-4.7",
+    "qwen3.8-max",
+    "qwen3.7-max",
+    "kimi-k3"
 ]
