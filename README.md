@@ -83,12 +83,39 @@ alfred --tui
 | POST | `/api/todos` | Create a todo |
 | DELETE | `/api/todos/{id}` | Delete a todo |
 
+## Work Item System
+
+Alfred includes a work item system for autonomous development:
+
+```bash
+# List all work items
+alfred workitem list
+
+# Get next item to work on
+alfred workitem next
+
+# Add a new work item
+alfred workitem add --title "My feature" --description "Details" --priority high
+
+# Assign to agent
+alfred workitem assign <ID> <AGENT_ID>
+
+# Update status
+alfred workitem update <ID> --status in_progress
+
+# Complete with verification
+alfred workitem complete <ID> --verification "test output"
+```
+
+See [WORKITEMS.md](WORKITEMS.md) for full documentation.
+
 ## Documentation
 
 - [INSTALL.md](scripts/INSTALL.md) - Detailed installation guide
 - [UPGRADE.md](scripts/UPGRADE.md) - Upgrade instructions
 - [RELEASE.md](scripts/RELEASE.md) - Release process
 - [ROADMAP.md](ROADMAP.md) - Upcoming features
+- [WORKITEMS.md](WORKITEMS.md) - Work item system for autonomous development
 
 ## Supported Providers
 

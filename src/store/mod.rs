@@ -171,7 +171,39 @@ impl Store {
                 role TEXT NOT NULL,
                 content TEXT NOT NULL,
                 timestamp INTEGER NOT NULL
-            );"
+            );
+            CREATE TABLE IF NOT EXISTS work_items (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                acceptance_criteria TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                priority TEXT NOT NULL DEFAULT 'medium',
+                category TEXT NOT NULL,
+                assigned_agent TEXT,
+                assigned_at INTEGER,
+                completed_at INTEGER,
+                depends_on TEXT,
+                blocks TEXT,
+                progress_log TEXT,
+                verification_command TEXT,
+                estimated_effort TEXT,
+                actual_effort TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS work_item_history (
+                id TEXT PRIMARY KEY,
+                work_item_id TEXT NOT NULL,
+                old_status TEXT,
+                new_status TEXT,
+                agent_id TEXT,
+                note TEXT,
+                timestamp INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_work_items_status ON work_items(status);
+            CREATE INDEX IF NOT EXISTS idx_work_items_priority ON work_items(priority);
+            CREATE INDEX IF NOT EXISTS idx_work_item_history_item ON work_item_history(work_item_id);"
         )?;
         Ok(Self { conn: Mutex::new(conn) })
     }

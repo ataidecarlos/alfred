@@ -14,6 +14,7 @@ mod store;
 mod tools;
 mod tui;
 mod types;
+mod workitem;
 mod workspace;
 
 use std::sync::Arc;
@@ -64,6 +65,97 @@ struct Cli {
     /// Theme to use for dumps: dark or light
     #[arg(long)]
     dump_theme: Option<String>,
+    /// Manage work items (for autonomous development)
+    #[command(subcommand)]
+    command: Option<CliCommand>,
+}
+
+#[derive(Parser)]
+enum CliCommand {
+    /// Work item management
+    #[command(name = "workitem")]
+    WorkItem(WorkItemArgs),
+}
+
+#[derive(Parser)]
+struct WorkItemArgs {
+    #[command(subcommand)]
+    command: WorkItemCommand,
+}
+
+#[derive(Parser)]
+enum WorkItemCommand {
+    /// List all work items
+    List {
+        /// Filter by status: pending, in_progress, blocked, completed, failed
+        #[arg(short, long)]
+        status: Option<String>,
+    },
+    /// Show the next work item to work on
+    Next,
+    /// Show details of a specific work item
+    Show {
+        /// Work item ID
+        id: String,
+    },
+    /// Add a new work item
+    Add {
+        /// Title
+        #[arg(short, long)]
+        title: String,
+        /// Description
+        #[arg(short, long)]
+        description: String,
+        /// Priority: critical, high, medium, low
+        #[arg(short, long, default_value = "medium")]
+        priority: String,
+        /// Category: infrastructure, feature, bug, experiment, refactor
+        #[arg(short, long, default_value = "feature")]
+        category: String,
+        /// Verification command (shell command to verify completion)
+        #[arg(short, long)]
+        verification: Option<String>,
+        /// Estimated effort: S, M, L, XL
+        #[arg(long)]
+        effort: Option<String>,
+        /// Dependencies (comma-separated work item IDs)
+        #[arg(long)]
+        depends: Option<String>,
+    },
+    /// Assign a work item to an agent
+    Assign {
+        /// Work item ID
+        id: String,
+        /// Agent ID
+        agent: String,
+    },
+    /// Update work item status
+    Update {
+        /// Work item ID
+        id: String,
+        /// New status: pending, in_progress, blocked, completed, failed
+        #[arg(short, long)]
+        status: Option<String>,
+        /// Note to add
+        #[arg(short, long)]
+        note: Option<String>,
+    },
+    /// Complete a work item with verification output
+    Complete {
+        /// Work item ID
+        id: String,
+        /// Verification output
+        #[arg(short, long)]
+        verification: String,
+    },
+    /// Log progress on a work item
+    Log {
+        /// Work item ID
+        id: String,
+        /// Progress note
+        #[arg(short, long)]
+        note: String,
+    },
 }
 
 fn ensure_directories() {
@@ -174,6 +266,11 @@ async fn main() {
 
     if cli.dump || (cli.dump_theme.is_some() && !cli.dump_palette) {
         run_dump_mode(&cli.config, cli.dump_theme.as_deref(), false, None, 0).await;
+        return;
+    }
+
+    if let Some(CliCommand::WorkItem(workitem_args)) = cli.command {
+        run_workitem_command(workitem_args.command, &cli.config).await;
         return;
     }
 
@@ -473,5 +570,160 @@ async fn run_tui_mode(config_path: &Option<String>) {
     if let Err(e) = tui::run(server_url).await {
         error!("TUI error: {}", e);
         std::process::exit(1);
+    }
+}
+
+async fn run_workitem_command(cmd: WorkItemCommand, config_path: &Option<String>) {
+    let store = match Store::new(Paths::database_file().as_path()) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("Failed to open database: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    match cmd {
+        WorkItemCommand::List { status } => {
+            match store.list_workitems(status.as_deref()) {
+                Ok(items) => {
+                    if items.is_empty() {
+                        println!("No work items found.");
+                    } else {
+                        println!("{:<8} {:<10} {:<10} {:<50}", "ID", "STATUS", "PRIORITY", "TITLE");
+                        println!("{}", "-".repeat(88));
+                        for item in &items {
+                            println!("{:<8} {:<10} {:<10} {:<50}", &item.id[..8], item.status, item.priority, &item.title[..50.min(item.title.len())]);
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to list work items: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        WorkItemCommand::Next => {
+            match store.get_next_workitem() {
+                Ok(Some(item)) => {
+                    println!("Next work item: {}", item.id);
+                    println!("Title: {}", item.title);
+                    println!("Priority: {}", item.priority);
+                    println!("Category: {}", item.category);
+                    println!("Description: {}", item.description);
+                    println!("Effort: {}", item.estimated_effort.unwrap_or_else(|| "Unknown".to_string()));
+                    if let Some(verification) = &item.verification_command {
+                        println!("Verification: {}", verification);
+                    }
+                }
+                Ok(None) => {
+                    println!("No pending work items available.");
+                }
+                Err(e) => {
+                    error!("Failed to get next work item: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        WorkItemCommand::Show { id } => {
+            match store.get_workitem(&id) {
+                Ok(Some(item)) => {
+                    println!("Work Item: {}", item.id);
+                    println!("Title: {}", item.title);
+                    println!("Description: {}", item.description);
+                    println!("Status: {}", item.status);
+                    println!("Priority: {}", item.priority);
+                    println!("Category: {}", item.category);
+                    println!("Effort: {}", item.estimated_effort.unwrap_or_else(|| "Unknown".to_string()));
+                    println!("Created: {}", chrono::DateTime::from_timestamp(item.created_at, 0).unwrap_or_default());
+                    println!("Updated: {}", chrono::DateTime::from_timestamp(item.updated_at, 0).unwrap_or_default());
+                    if !item.acceptance_criteria.is_empty() {
+                        println!("Acceptance Criteria: {}", item.acceptance_criteria);
+                    }
+                    if let Some(verification) = &item.verification_command {
+                        println!("Verification: {}", verification);
+                    }
+                    if let Some(agent) = &item.assigned_agent {
+                        println!("Assigned Agent: {}", agent);
+                    }
+                }
+                Ok(None) => {
+                    println!("Work item not found: {}", id);
+                }
+                Err(e) => {
+                    error!("Failed to get work item: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        WorkItemCommand::Add { title, description, priority, category, verification, effort, depends } => {
+            let depends_on = depends.map(|d| {
+                d.split(',').map(|s| s.trim().to_string()).collect::<Vec<_>>()
+            });
+            let new_item = workitem::NewWorkItem {
+                title,
+                description,
+                acceptance_criteria: vec![],  // Will be set later
+                priority,
+                category,
+                depends_on,
+                verification_command: verification,
+                estimated_effort: effort,
+            };
+            match store.add_workitem(&new_item) {
+                Ok(id) => {
+                    println!("Work item created: {}", id);
+                }
+                Err(e) => {
+                    error!("Failed to create work item: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        WorkItemCommand::Assign { id, agent } => {
+            match store.assign_workitem(&id, &agent) {
+                Ok(()) => {
+                    println!("Work item {} assigned to {}", id, agent);
+                }
+                Err(e) => {
+                    error!("Failed to assign work item: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        WorkItemCommand::Update { id, status, note } => {
+            if let Some(status) = status {
+                match store.update_workitem_status(&id, &status, note.as_deref()) {
+                    Ok(()) => {
+                        println!("Work item {} status updated to {}", id, status);
+                    }
+                    Err(e) => {
+                        error!("Failed to update work item: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+        WorkItemCommand::Complete { id, verification } => {
+            match store.complete_workitem(&id, &verification) {
+                Ok(()) => {
+                    println!("Work item {} completed", id);
+                }
+                Err(e) => {
+                    error!("Failed to complete work item: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        WorkItemCommand::Log { id, note } => {
+            match store.log_workitem_progress(&id, &note) {
+                Ok(()) => {
+                    println!("Progress logged for work item {}", id);
+                }
+                Err(e) => {
+                    error!("Failed to log progress: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
     }
 }
