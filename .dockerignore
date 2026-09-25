@@ -1,0 +1,28 @@
+# Build context exclusions
+target
+.git
+.gitignore
+
+# Local runtime data / secrets
+.env
+.env.local
+local_vars.txt
+test_api_keys.toml
+config/config.toml
+prompts/system.md
+prompts/user.md
+data
+logs
+
+# Tests and tooling
+tests
+.github
+*.md
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode
+.idea

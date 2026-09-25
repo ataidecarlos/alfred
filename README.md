@@ -162,6 +162,28 @@ cargo build --release
 cargo test
 ```
 
+### Docker
+
+Build a self-contained image that compiles Alfred from source and runs it with
+a clean config:
+
+```bash
+docker build -t alfred-test .
+docker run --rm -p 3000:3000 -e OPENAI_API_KEY=sk-... alfred-test
+```
+
+API keys are injected through environment variables (`OPENAI_API_KEY`,
+`ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `DEEPSEEK_API_KEY`) and expanded by
+Alfred when it loads the container config. The server listens on port `3000`.
+
+To run a command against a throwaway, freshly booted server (used for smoke
+tests):
+
+```bash
+docker run --rm alfred-test curl -s localhost:3000/health
+./docker/test.sh
+```
+
 ## License
 
 MIT

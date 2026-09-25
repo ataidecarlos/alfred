@@ -1,0 +1,38 @@
+# Clean, container-first Alfred configuration.
+#
+# API keys are injected through environment variables and expanded by Alfred
+# when the config is loaded (see src/config.rs::expand_env_vars). Change
+# llm.default_provider to use a different provider.
+
+[server]
+port = 3000
+host = "0.0.0.0"
+
+[llm]
+default_provider = "openai"
+
+[llm.providers.openai]
+api_key = "${OPENAI_API_KEY}"
+model = "gpt-4o"
+
+[llm.providers.anthropic]
+api_key = "${ANTHROPIC_API_KEY}"
+model = "claude-sonnet-4-20250514"
+
+[llm.providers.google]
+api_key = "${GOOGLE_API_KEY}"
+model = "gemini-2.0-flash"
+
+[llm.providers.deepseek]
+api_key = "${DEEPSEEK_API_KEY}"
+model = "deepseek-v4-flash"
+base_url = "https://api.deepseek.com"
+
+# Empty table: prompt files use the default paths under ~/.alfred/config/prompts.
+[prompt]
+
+[scheduler]
+enabled = false
+
+[memory]
+enabled = false
