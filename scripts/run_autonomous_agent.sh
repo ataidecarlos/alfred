@@ -42,8 +42,8 @@ fi
 
 echo "$NEXT" >> "$LOG_FILE"
 
-# Run the autonomous agent
-"$OPENCODE" run "$(cat "$PROMPT_FILE")" >> "$LOG_FILE" 2>&1
+# Run the autonomous agent (sg docker ensures docker group access for T4-T6 tickets)
+sg docker -c "$OPENCODE run \"$(cat "$PROMPT_FILE")\"" >> "$LOG_FILE" 2>&1
 
 # Log finish
 echo "=== Agent run finished at $(date -u '+%Y-%m-%dT%H:%M:%SZ') ===" >> "$LOG_FILE"
