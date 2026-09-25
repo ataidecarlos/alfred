@@ -4,11 +4,16 @@ Alfred is a lightweight AI agent that runs as a 24/7 server, providing automatio
 
 ## Features
 
-- **Multi-provider LLM support**: OpenAI, Anthropic, Google, DeepSeek
-- **Built-in tools**: Webhook, Shell command, Todo management
-- **Multiple interfaces**: REST API, Telegram connector, Terminal UI (TUI)
-- **Scheduled tasks**: Cron-based automation
-- **Persistent storage**: SQLite database for conversations, todos, and memories
+- **Multi-provider LLM support**: OpenCode Go, OpenAI, Anthropic, Google, DeepSeek
+- **Laya decision layer**: a local confidence scorer answers routine requests directly and delegates everything else to the configured LLM
+- **Built-in tools**: Shell command, Webhook, Todo management
+- **Multiple interfaces**: REST API, Telegram connector, and a terminal UI (TUI) with a command palette and an interactive control center
+- **Work item system**: SQLite-backed tracker for autonomous development, with dependency resolution and automated verification
+- **Scheduler CLI**: manage OS-level cron jobs (Linux/macOS) and Windows Task Scheduler entries from one interface
+- **Memory**: markdown memory vault with a SQLite index and Laya-aware retrieval
+- **Config hot-reload**: config file edits are applied without restarting the server
+- **Persistent storage**: SQLite database for conversations, todos, memories, and work items
+- **Docker image**: self-contained image that compiles Alfred from source for pristine, throwaway testing
 
 ## Quick Start
 
@@ -30,22 +35,36 @@ Download the latest release from [GitHub Releases](https://github.com/ataidecarl
 
 ## Configuration
 
-After installation, edit your config file:
+Alfred keeps all of its state under `~/.alfred` (`%USERPROFILE%\.alfred` on Windows):
 
-- **Linux/Mac**: `~/.config/alfred/config.toml`
-- **Windows**: `%APPDATA%\alfred\config.toml`
+| Path | Purpose |
+|------|---------|
+| `~/.alfred/config/config.toml` | Main configuration file |
+| `~/.alfred/config/prompts/` | System and user prompt files |
+| `~/.alfred/config/themes/` | TUI theme files |
+| `~/.alfred/data/alfred.db` | SQLite database (conversations, todos, memories, work items) |
+| `~/.alfred/logs/alfred.log` | Server log |
 
-Add your API keys:
+On first run Alfred creates the config from the bundled example if it is missing. Edit it and add your API keys:
+
+- **Linux/Mac**: `~/.alfred/config/config.toml`
+- **Windows**: `%USERPROFILE%\.alfred\config\config.toml`
 
 ```toml
+[server]
+port = 8080
+host = "0.0.0.0"
+
 [llm]
 default_provider = "opencode-go"
 
 [llm.providers.opencode-go]
-api_key = "your-opencode-go-key-here"
+api_key = "${OPENCODE_GO_API_KEY}"
 model = "space-bunny-free"
 base_url = "https://opencode.ai/zen/go/v1"
 ```
+
+`${VAR}` references are expanded from the environment when the config is loaded, so keys can be injected without writing them to disk. Changes to the config are hot-reloaded: Alfred picks them up without a restart.
 
 ## Usage
 
@@ -61,17 +80,7 @@ alfred
 alfred --tui
 ```
 
-### Update
-
-**Linux/Mac:**
-```bash
-~/.local/bin/alfred/scripts/update.sh
-```
-
-**Windows (PowerShell):**
-```powershell
-& "$env:LOCALAPPDATA\bin\scripts\update.ps1"
-```
+The TUI connects to a running server (starting one automatically if needed). Press `Ctrl+P` for the command palette and `Ctrl+K` to open the control center, which shows scheduler jobs, todos, memories, and connected channels. Slash commands such as `/todos`, `/memories`, and `/config` are available from the prompt.
 
 ## Scheduled Tasks
 
@@ -102,11 +111,17 @@ keywords above map onto Task Scheduler.
 | POST | `/api/messages` | Send message to agent |
 | GET | `/api/todos` | List all todos |
 | POST | `/api/todos` | Create a todo |
+| PUT | `/api/todos/{id}` | Update a todo |
 | DELETE | `/api/todos/{id}` | Delete a todo |
+| POST | `/api/todos/{id}/complete` | Mark a todo complete |
+| GET | `/api/memories` | List all memories |
+| POST | `/api/memories` | Create a memory |
+| DELETE | `/api/memories/{id}` | Delete a memory |
 
 ## Work Item System
 
-Alfred includes a work item system for autonomous development:
+Alfred includes a work item system for autonomous development. Items live in the
+same SQLite database as the rest of Alfred's state (`~/.alfred/data/alfred.db`):
 
 ```bash
 # List all work items
@@ -114,6 +129,9 @@ alfred workitem list
 
 # Get next item to work on
 alfred workitem next
+
+# Show details for one item
+alfred workitem show <ID>
 
 # Add a new work item
 alfred workitem add --title "My feature" --description "Details" --priority high
