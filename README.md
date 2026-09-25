@@ -72,6 +72,26 @@ alfred --tui
 & "$env:LOCALAPPDATA\bin\scripts\update.ps1"
 ```
 
+## Scheduled Tasks
+
+Manage OS-level scheduled jobs with a unified interface — the user crontab on
+Linux/macOS and Task Scheduler on Windows:
+
+```bash
+# List scheduled jobs
+alfred scheduler list
+
+# Add a job (cron schedule + command)
+alfred scheduler add '*/5 * * * *' 'echo hello'
+
+# Remove a job
+alfred scheduler remove '*/5 * * * *' 'echo hello'
+```
+
+The 5-field cron syntax and `@hourly`/`@daily`/`@weekly`/`@monthly`/`@reboot`
+keywords are supported. On Windows, only `*/N * * * *`, `M H * * *`, and the
+keywords above map onto Task Scheduler.
+
 ## API Endpoints
 
 | Method | Endpoint | Description |
