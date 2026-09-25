@@ -119,7 +119,7 @@ enum WorkItemCommand {
         #[arg(short, long)]
         title: String,
         /// Description
-        #[arg(short, long)]
+        #[arg(short, long, default_value = "")]
         description: String,
         /// Priority: critical, high, medium, low
         #[arg(short, long, default_value = "medium")]
@@ -155,13 +155,13 @@ enum WorkItemCommand {
         #[arg(short, long)]
         note: Option<String>,
     },
-    /// Complete a work item with verification output
+    /// Complete a work item; runs its verification command when one is set
     Complete {
         /// Work item ID
         id: String,
-        /// Verification output
+        /// Verification output/note (only used when the item has no verification command)
         #[arg(short, long)]
-        verification: String,
+        verification: Option<String>,
     },
     /// Log progress on a work item
     Log {
@@ -655,7 +655,9 @@ async fn run_workitem_command(cmd: WorkItemCommand, config_path: &Option<String>
         WorkItemCommand::Next => {
             match store.get_next_workitem() {
                 Ok(Some(item)) => {
-                    println!("Next work item: {}", item.id);
+                    // First line is the bare ID so scripts can extract it with
+                    // `workitem next | head -1 | awk '{print $1}'`.
+                    println!("{}", item.id);
                     println!("Title: {}", item.title);
                     println!("Priority: {}", item.priority);
                     println!("Category: {}", item.category);
@@ -754,9 +756,18 @@ async fn run_workitem_command(cmd: WorkItemCommand, config_path: &Option<String>
             }
         }
         WorkItemCommand::Complete { id, verification } => {
-            match store.complete_workitem(&id, &verification) {
-                Ok(()) => {
-                    println!("Work item {} completed", id);
+            match store.complete_workitem_verified(&id, verification.as_deref()) {
+                Ok(result) => {
+                    if result.completed {
+                        println!("Work item {} completed", id);
+                        if !result.output.is_empty() {
+                            println!("Verification: {}", result.output);
+                        }
+                    } else {
+                        error!("Work item {} failed verification: {}", id, result.output);
+                        println!("Work item {} marked failed: {}", id, result.output);
+                        std::process::exit(1);
+                    }
                 }
                 Err(e) => {
                     error!("Failed to complete work item: {}", e);

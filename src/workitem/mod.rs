@@ -1,3 +1,6 @@
+use std::path::PathBuf;
+use std::process::Command;
+
 use chrono::Utc;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
@@ -5,6 +8,79 @@ use uuid::Uuid;
 
 use crate::error::AlfredError;
 use crate::store::Store;
+
+/// Result of executing a work item's verification command.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VerificationOutcome {
+    pub success: bool,
+    pub exit_code: Option<i32>,
+    pub output: String,
+}
+
+/// Result of attempting to complete a work item.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VerifiedCompletion {
+    /// True when the item was marked completed, false when verification failed.
+    pub completed: bool,
+    /// Human-readable verification output or failure reason.
+    pub output: String,
+}
+
+/// Run a verification command through the platform shell.
+///
+/// The directory containing the currently running executable is prepended to
+/// `PATH` so verification commands which invoke `alfred` resolve to the same
+/// build that is performing the verification.
+pub fn run_verification_command(command: &str) -> VerificationOutcome {
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut c = Command::new("cmd");
+        c.args(["/C", command]);
+        c
+    };
+    #[cfg(not(target_os = "windows"))]
+    let mut cmd = {
+        let mut c = Command::new("sh");
+        c.args(["-c", command]);
+        c
+    };
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let mut paths: Vec<PathBuf> =
+                std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
+            paths.insert(0, dir.to_path_buf());
+            if let Ok(joined) = std::env::join_paths(paths) {
+                cmd.env("PATH", joined);
+            }
+        }
+    }
+
+    match cmd.output() {
+        Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let mut combined = String::new();
+            combined.push_str(stdout.trim_end());
+            if !stderr.trim().is_empty() {
+                if !combined.is_empty() {
+                    combined.push('\n');
+                }
+                combined.push_str(stderr.trim_end());
+            }
+            VerificationOutcome {
+                success: out.status.success(),
+                exit_code: out.status.code(),
+                output: combined.trim().to_string(),
+            }
+        }
+        Err(e) => VerificationOutcome {
+            success: false,
+            exit_code: None,
+            output: format!("failed to execute verification command: {}", e),
+        },
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WorkItem {
@@ -270,6 +346,60 @@ impl Store {
         Ok(())
     }
 
+    /// Complete a work item, running its verification command when one is set.
+    ///
+    /// - verification command exits 0 -> status `completed`
+    /// - verification command exits != 0 -> status `failed`, output recorded
+    /// - no verification command -> status `completed`, recording `manual_output`
+    pub fn complete_workitem_verified(
+        &self,
+        id: &str,
+        manual_output: Option<&str>,
+    ) -> Result<VerifiedCompletion, AlfredError> {
+        let item = match self.get_workitem(id)? {
+            Some(item) => item,
+            None => return Err(AlfredError::Store(rusqlite::Error::QueryReturnedNoRows)),
+        };
+
+        match item.verification_command.as_deref().map(str::trim) {
+            Some(command) if !command.is_empty() => {
+                let outcome = run_verification_command(command);
+                if outcome.success {
+                    self.complete_workitem(id, &outcome.output)?;
+                    Ok(VerifiedCompletion {
+                        completed: true,
+                        output: outcome.output,
+                    })
+                } else {
+                    let code = outcome
+                        .exit_code
+                        .map(|c| c.to_string())
+                        .unwrap_or_else(|| "unknown".to_string());
+                    let reason = if outcome.output.is_empty() {
+                        format!("Verification failed (exit {})", code)
+                    } else {
+                        format!("Verification failed (exit {}): {}", code, outcome.output)
+                    };
+                    self.update_workitem_status(id, "failed", Some(&reason))?;
+                    Ok(VerifiedCompletion {
+                        completed: false,
+                        output: reason,
+                    })
+                }
+            }
+            _ => {
+                let output = manual_output
+                    .unwrap_or("No verification command")
+                    .to_string();
+                self.complete_workitem(id, &output)?;
+                Ok(VerifiedCompletion {
+                    completed: true,
+                    output,
+                })
+            }
+        }
+    }
+
     pub fn log_workitem_progress(&self, id: &str, note: &str) -> Result<(), AlfredError> {
         let now = Utc::now().timestamp();
         let conn = self.conn();
@@ -400,5 +530,78 @@ mod tests {
         assert_eq!(history.len(), 3);
         assert_eq!(history[2].new_status.as_deref(), Some("completed"));
         assert!(history[2].note.as_deref().unwrap().contains("Verification: ok"));
+    }
+
+    fn item_with_verification(command: &str) -> NewWorkItem {
+        NewWorkItem {
+            verification_command: Some(command.to_string()),
+            ..new_item()
+        }
+    }
+
+    #[test]
+    fn run_verification_command_captures_output_and_success() {
+        let outcome = run_verification_command("echo hello");
+        assert!(outcome.success);
+        assert_eq!(outcome.exit_code, Some(0));
+        assert_eq!(outcome.output, "hello");
+
+        let failure = run_verification_command("exit 3");
+        assert!(!failure.success);
+        assert_eq!(failure.exit_code, Some(3));
+    }
+
+    #[test]
+    fn verification_success_marks_item_completed() {
+        let store = test_store();
+        let id = store.add_workitem(&item_with_verification("echo success")).unwrap();
+
+        let result = store.complete_workitem_verified(&id, None).unwrap();
+
+        assert!(result.completed);
+        assert!(result.output.contains("success"));
+        let item = store.get_workitem(&id).unwrap().unwrap();
+        assert_eq!(item.status, "completed");
+        assert!(item.completed_at.is_some());
+    }
+
+    #[test]
+    fn verification_failure_marks_item_failed_and_logs_output() {
+        let store = test_store();
+        let id = store.add_workitem(&item_with_verification("echo boom && exit 2")).unwrap();
+
+        let result = store.complete_workitem_verified(&id, None).unwrap();
+
+        assert!(!result.completed);
+        assert!(result.output.contains("Verification failed"));
+        assert!(result.output.contains("boom"));
+        let item = store.get_workitem(&id).unwrap().unwrap();
+        assert_eq!(item.status, "failed");
+        assert!(item.completed_at.is_none());
+
+        let history = store.get_workitem_history(&id).unwrap();
+        let last = history.last().unwrap();
+        assert_eq!(last.new_status.as_deref(), Some("failed"));
+        assert!(last.note.as_deref().unwrap().contains("boom"));
+    }
+
+    #[test]
+    fn completion_without_verification_command_uses_manual_output() {
+        let store = test_store();
+        let id = store.add_workitem(&new_item()).unwrap();
+
+        let result = store
+            .complete_workitem_verified(&id, Some("manual check ok"))
+            .unwrap();
+
+        assert!(result.completed);
+        assert_eq!(result.output, "manual check ok");
+        assert_eq!(store.get_workitem(&id).unwrap().unwrap().status, "completed");
+    }
+
+    #[test]
+    fn complete_verified_unknown_id_errors() {
+        let store = test_store();
+        assert!(store.complete_workitem_verified("missing", None).is_err());
     }
 }

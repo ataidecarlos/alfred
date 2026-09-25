@@ -78,8 +78,20 @@ alfred workitem update <ID> --status in_progress --note "Starting work"
 
 ### Complete Work Item
 
+Completing an item automatically runs its `verification_command` (when set):
+
+- exit `0` → item is marked `completed`, output is recorded
+- exit `!= 0` → item is marked `failed`, output is logged, command exits non-zero
+
 ```bash
-alfred workitem complete <ID> --verification "test output"
+alfred workitem complete <ID>
+```
+
+`--verification "<text>"` is still accepted and is recorded as the output when
+the item has no `verification_command`:
+
+```bash
+alfred workitem complete <ID> --verification "manual check ok"
 ```
 
 ### Log Progress

@@ -124,8 +124,8 @@ alfred workitem assign <ID> <AGENT_ID>
 # Update status
 alfred workitem update <ID> --status in_progress
 
-# Complete with verification
-alfred workitem complete <ID> --verification "test output"
+# Complete (runs the item's verification command automatically)
+alfred workitem complete <ID>
 ```
 
 See [WORKITEMS.md](WORKITEMS.md) for full documentation.
