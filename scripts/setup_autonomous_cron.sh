@@ -7,6 +7,7 @@ set -e
 LOG_FILE="${HOME}/.alfred/agent.log"
 PROMPT_FILE="$(dirname "$0")/../prompts/autonomous_developer.md"
 ALFRED_BIN="$(dirname "$0")/../target/release/alfred"
+AGENT_RUNNER="$(dirname "$0")/run_autonomous_agent.sh"
 
 # Ensure log directory exists
 mkdir -p "$(dirname "$LOG_FILE")"
@@ -24,13 +25,19 @@ if [ ! -f "$PROMPT_FILE" ]; then
     exit 1
 fi
 
+# Verify agent runner exists
+if [ ! -f "$AGENT_RUNNER" ]; then
+    echo "Error: Agent runner not found at $AGENT_RUNNER"
+    exit 1
+fi
+
 # Detect OS
 OS="$(uname -s)"
 
 case "$OS" in
     Linux)
         echo "Setting up Linux cron job..."
-        CRON_CMD="0 * * * * $ALFRED_BIN --prompt \"$PROMPT_FILE\" >> $LOG_FILE 2>&1"
+        CRON_CMD="0 * * * * $AGENT_RUNNER >> $LOG_FILE 2>&1"
         
         # Check if cron job already exists
         if crontab -l 2>/dev/null | grep -q "alfred.*autonomous"; then
@@ -56,9 +63,7 @@ case "$OS" in
     <string>com.alfred.autonomous</string>
     <key>ProgramArguments</key>
     <array>
-        <string>$ALFRED_BIN</string>
-        <string>--prompt</string>
-        <string>$PROMPT_FILE</string>
+        <string>$AGENT_RUNNER</string>
     </array>
     <key>StartInterval</key>
     <integer>3600</integer>
@@ -99,8 +104,8 @@ EOF
   </Triggers>
   <Actions>
     <Exec>
-      <Command>$ALFRED_BIN</Command>
-      <Arguments>--prompt "$PROMPT_FILE"</Arguments>
+      <Command>$AGENT_RUNNER</Command>
+      <Arguments></Arguments>
     </Exec>
   </Actions>
   <Settings>
@@ -124,7 +129,7 @@ EOF
     *)
         echo "Unsupported OS: $OS"
         echo "Please set up hourly cron manually:"
-        echo "  $ALFRED_BIN --prompt $PROMPT_FILE >> $LOG_FILE 2>&1"
+        echo "  $AGENT_RUNNER >> $LOG_FILE 2>&1"
         exit 1
         ;;
 esac
@@ -135,4 +140,4 @@ echo "Logs: $LOG_FILE"
 echo "Prompt: $PROMPT_FILE"
 echo ""
 echo "To test manually:"
-echo "  $ALFRED_BIN --prompt $PROMPT_FILE"
+echo "  $AGENT_RUNNER"

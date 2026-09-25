@@ -2,8 +2,6 @@
 # Wrapper script for autonomous agent cron job
 # Handles environment setup and ensures proper logging
 
-set -euo pipefail
-
 # Environment
 export HOME=/home/azureuser
 export PATH="/home/azureuser/.opencode/bin:/home/azureuser/.cargo/bin:/usr/local/bin:/usr/bin:/bin"
@@ -43,7 +41,8 @@ fi
 echo "$NEXT" >> "$LOG_FILE"
 
 # Run the autonomous agent (sg docker ensures docker group access for T4-T6 tickets)
-sg docker -c "$OPENCODE run \"$(cat "$PROMPT_FILE")\"" >> "$LOG_FILE" 2>&1
+# Attach prompt file to avoid shell expansion issues with $ITEM_ID etc.
+sg docker -c "bash -c '$OPENCODE run --file \"$PROMPT_FILE\" \"Read the attached file and follow its instructions\"' >> \"$LOG_FILE\" 2>&1"
 
 # Log finish
 echo "=== Agent run finished at $(date -u '+%Y-%m-%dT%H:%M:%SZ') ===" >> "$LOG_FILE"

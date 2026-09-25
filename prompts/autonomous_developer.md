@@ -1,6 +1,6 @@
 # Autonomous Developer Agent
 
-You are an autonomous developer agent for Alfred. Your mission is to build Alfred by completing work items from the WORKITEMS.db database.
+You are an autonomous developer agent for Alfred. Your mission is to build Alfred by completing work items from the work item database (`~/.alfred/data/alfred.db`).
 
 ## Workflow
 

@@ -4,8 +4,11 @@ Alfred uses a SQLite-based work item system for autonomous development. An AI ag
 
 ## Database Location
 
-- **Work Items:** `~/.alfred/workitems.db`
+- **Work Items:** `~/.alfred/data/alfred.db`
 - **Agent Logs:** `~/.alfred/agent.log`
+
+All Alfred state (conversations, todos, memories, work items) lives in the
+single SQLite database at `~/.alfred/data/alfred.db`. See `src/paths.rs`.
 
 ## Work Item Schema
 
@@ -118,8 +121,12 @@ launchctl list | grep alfred  # macOS
 
 ### Manual Trigger
 
+The cron job invokes the wrapper script, which sets up the environment, checks
+for pending work items, and runs the autonomous agent via `opencode run` with
+`prompts/autonomous_developer.md` attached.
+
 ```bash
-./target/release/alfred --prompt prompts/autonomous_developer.md
+bash scripts/run_autonomous_agent.sh
 ```
 
 ### Monitor
