@@ -136,6 +136,9 @@ enum WorkItemCommand {
         /// Dependencies (comma-separated work item IDs)
         #[arg(long)]
         depends: Option<String>,
+        /// Acceptance criteria (repeatable)
+        #[arg(long = "acceptance", value_name = "CRITERION")]
+        acceptance: Vec<String>,
     },
     /// Assign a work item to an agent
     Assign {
@@ -689,7 +692,14 @@ async fn run_workitem_command(cmd: WorkItemCommand, config_path: &Option<String>
                     println!("Created: {}", chrono::DateTime::from_timestamp(item.created_at, 0).unwrap_or_default());
                     println!("Updated: {}", chrono::DateTime::from_timestamp(item.updated_at, 0).unwrap_or_default());
                     if !item.acceptance_criteria.is_empty() {
-                        println!("Acceptance Criteria: {}", item.acceptance_criteria);
+                        if let Ok(criteria) = serde_json::from_str::<Vec<String>>(&item.acceptance_criteria) {
+                            println!("Acceptance Criteria:");
+                            for (i, c) in criteria.iter().enumerate() {
+                                println!("  {}. {}", i + 1, c);
+                            }
+                        } else {
+                            println!("Acceptance Criteria: {}", item.acceptance_criteria);
+                        }
                     }
                     if let Some(verification) = &item.verification_command {
                         println!("Verification: {}", verification);
@@ -707,14 +717,14 @@ async fn run_workitem_command(cmd: WorkItemCommand, config_path: &Option<String>
                 }
             }
         }
-        WorkItemCommand::Add { title, description, priority, category, verification, effort, depends } => {
+        WorkItemCommand::Add { title, description, priority, category, verification, effort, depends, acceptance } => {
             let depends_on = depends.map(|d| {
                 d.split(',').map(|s| s.trim().to_string()).collect::<Vec<_>>()
             });
             let new_item = workitem::NewWorkItem {
                 title,
                 description,
-                acceptance_criteria: vec![],  // Will be set later
+                acceptance_criteria: acceptance,
                 priority,
                 category,
                 depends_on,

@@ -267,9 +267,9 @@ impl Store {
     pub fn get_next_workitem(&self) -> Result<Option<WorkItem>, AlfredError> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT id, title, description, acceptance_criteria, status, priority, category, assigned_agent, assigned_at, completed_at, depends_on, blocks, progress_log, verification_command, estimated_effort, actual_effort, created_at, updated_at FROM work_items WHERE status = 'pending' AND (depends_on IS NULL OR depends_on = '[]') ORDER BY CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 END, created_at LIMIT 1"
+            "SELECT id, title, description, acceptance_criteria, status, priority, category, assigned_agent, assigned_at, completed_at, depends_on, blocks, progress_log, verification_command, estimated_effort, actual_effort, created_at, updated_at FROM work_items WHERE status = 'pending' ORDER BY CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 END, created_at"
         )?;
-        let mut rows = stmt.query_map([], |row| {
+        let mut items = stmt.query_map([], |row| {
             Ok(WorkItem {
                 id: row.get(0)?,
                 title: row.get(1)?,
@@ -291,10 +291,40 @@ impl Store {
                 updated_at: row.get(17)?,
             })
         })?;
-        match rows.next() {
-            Some(Ok(item)) => Ok(Some(item)),
-            _ => Ok(None),
+        // Collect all pending items first, then filter by satisfied dependencies.
+        // Cannot hold the connection guard while calling self.conn() again (non-reentrant mutex).
+        let all_pending: Vec<WorkItem> = items.by_ref().collect::<Result<Vec<_>, _>>()?;
+        drop(items);
+        drop(stmt);
+        drop(conn);
+        for item in all_pending {
+            if self.dependencies_satisfied(&item)? {
+                return Ok(Some(item));
+            }
         }
+        Ok(None)
+    }
+
+    /// Check if all dependencies for a work item are completed.
+    fn dependencies_satisfied(&self, item: &WorkItem) -> Result<bool, AlfredError> {
+        let deps: Vec<String> = item.depends_on.as_deref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_default();
+        if deps.is_empty() {
+            return Ok(true);
+        }
+        let conn = self.conn();
+        for dep_id in &deps {
+            let status: Option<String> = conn.query_row(
+                "SELECT status FROM work_items WHERE id = ?1",
+                params![dep_id],
+                |row| row.get(0),
+            ).ok();
+            if status.as_deref() != Some("completed") {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     pub fn assign_workitem(&self, id: &str, agent_id: &str) -> Result<(), AlfredError> {
@@ -424,9 +454,9 @@ impl Store {
     pub fn get_unblocked_items(&self) -> Result<Vec<WorkItem>, AlfredError> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT id, title, description, acceptance_criteria, status, priority, category, assigned_agent, assigned_at, completed_at, depends_on, blocks, progress_log, verification_command, estimated_effort, actual_effort, created_at, updated_at FROM work_items WHERE status = 'pending' AND (depends_on IS NULL OR depends_on = '[]') ORDER BY CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 END, created_at"
+            "SELECT id, title, description, acceptance_criteria, status, priority, category, assigned_agent, assigned_at, completed_at, depends_on, blocks, progress_log, verification_command, estimated_effort, actual_effort, created_at, updated_at FROM work_items WHERE status = 'pending' ORDER BY CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 END, created_at"
         )?;
-        let items = stmt.query_map([], |row| {
+        let mut items = stmt.query_map([], |row| {
             Ok(WorkItem {
                 id: row.get(0)?,
                 title: row.get(1)?,
@@ -447,8 +477,18 @@ impl Store {
                 created_at: row.get(16)?,
                 updated_at: row.get(17)?,
             })
-        })?.collect::<Result<Vec<_>, _>>()?;
-        Ok(items)
+        })?;
+        let all_pending: Vec<WorkItem> = items.by_ref().collect::<Result<Vec<_>, _>>()?;
+        drop(items);
+        drop(stmt);
+        drop(conn);
+        let mut result = Vec::new();
+        for item in all_pending {
+            if self.dependencies_satisfied(&item)? {
+                result.push(item);
+            }
+        }
+        Ok(result)
     }
 
     pub fn get_workitem_history(&self, work_item_id: &str) -> Result<Vec<WorkItemHistory>, AlfredError> {
@@ -603,5 +643,57 @@ mod tests {
     fn complete_verified_unknown_id_errors() {
         let store = test_store();
         assert!(store.complete_workitem_verified("missing", None).is_err());
+    }
+
+    #[test]
+    fn dependency_resolution_skips_blocked_items() {
+        let store = test_store();
+        // Item A with no dependencies
+        let a = store.add_workitem(&new_item()).unwrap();
+        // Item B depends on A
+        let mut b = new_item();
+        b.depends_on = Some(vec![a.clone()]);
+        let b_id = store.add_workitem(&b).unwrap();
+        // Item C depends on B
+        let mut c = new_item();
+        c.depends_on = Some(vec![b_id.clone()]);
+        let c_id = store.add_workitem(&c).unwrap();
+
+        // First next should be A
+        let next = store.get_next_workitem().unwrap().unwrap();
+        assert_eq!(next.id, a);
+
+        // Complete A
+        store.complete_workitem(&a, "done").unwrap();
+
+        // Now next should be B
+        let next = store.get_next_workitem().unwrap().unwrap();
+        assert_eq!(next.id, b_id);
+
+        // Complete B
+        store.complete_workitem(&b_id, "done").unwrap();
+
+        // Now next should be C
+        let next = store.get_next_workitem().unwrap().unwrap();
+        assert_eq!(next.id, c_id);
+
+        // Complete C
+        store.complete_workitem(&c_id, "done").unwrap();
+
+        // No more pending
+        assert!(store.get_next_workitem().unwrap().is_none());
+    }
+
+    #[test]
+    fn unblocked_items_excludes_dependent_pending() {
+        let store = test_store();
+        let a = store.add_workitem(&new_item()).unwrap();
+        let mut b = new_item();
+        b.depends_on = Some(vec![a.clone()]);
+        store.add_workitem(&b).unwrap();
+
+        let unblocked = store.get_unblocked_items().unwrap();
+        assert_eq!(unblocked.len(), 1);
+        assert_eq!(unblocked[0].id, a);
     }
 }
