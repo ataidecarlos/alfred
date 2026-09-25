@@ -65,6 +65,28 @@ Environment variables:
 | `test_todo.py` | Medium | Create, list, complete, delete todos in database |
 | `test_conversation.py` | Medium | Multi-turn context, tool usage, persistence |
 
+## Rust Integration Tests
+
+In addition to the Python end-to-end suite, the repository ships Rust
+integration tests under `tests/`. Run them from the project root:
+
+```bash
+cargo test --test laya_integration
+cargo test --test tui_control_center
+```
+
+| File | Verification for | Description |
+|------|------------------|-------------|
+| `laya_integration.rs` | Laya decision layer | High-confidence requests execute without an LLM call; all others delegate to the configured provider |
+| `tui_control_center.rs` | TUI control center | Control-center state machine and the real rendering path (`render_to_text`) |
+
+For a full end-to-end smoke test against a pristine container, build and run
+the Docker test image:
+
+```bash
+./docker/test.sh
+```
+
 ## How It Works
 
 1. **Server Lifecycle** (`conftest.py`):

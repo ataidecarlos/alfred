@@ -78,6 +78,18 @@
 - Unified directory structure (`~/.alfred/`)
 - Obsidian-friendly vault structure
 
+### Platform & Developer Tooling (v2026.09.25)
+- Work item system: SQLite-backed tracker for autonomous development, with
+  dependency resolution, automated verification, and the `alfred workitem` CLI
+- Scheduler CLI: OS-agnostic management of cron jobs (Linux/macOS) and Windows
+  Task Scheduler entries via `alfred scheduler`
+- TUI control center: `Ctrl+K` panel for managing scheduler jobs, todos,
+  memories, and connected channels
+- Config hot-reload: config file edits are applied without restarting the server
+- Laya decision layer: high-confidence requests execute directly without an LLM
+  call, and the chosen decision path is logged
+- Docker test image: pristine-container smoke test via `docker/test.sh`
+
 ## Contributing
 
 We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
