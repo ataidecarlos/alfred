@@ -17,12 +17,23 @@ use crate::agent::event::AgentEvent;
 use crate::llm::LlmProvider;
 use crate::agent::tool::ToolRegistry;
 
+/// Mutable configuration that can be swapped at runtime by the config watcher.
+///
+/// Everything here is derived from the on-disk config and is rebuilt when the
+/// file changes, without restarting the server.
+#[derive(Clone)]
+pub struct RuntimeConfig {
+    pub provider_name: String,
+    pub provider: Arc<dyn LlmProvider>,
+    pub model: String,
+    pub scheduler_enabled: bool,
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub store: Arc<crate::store::Store>,
     pub tools: Arc<ToolRegistry>,
-    pub provider: Arc<dyn LlmProvider>,
-    pub model: String,
+    pub runtime: Arc<tokio::sync::RwLock<RuntimeConfig>>,
     pub system_prompt: String,
     pub event_tx: broadcast::Sender<AgentEvent>,
     pub bus: Arc<crate::bus::MessageBus>,
@@ -31,6 +42,18 @@ pub struct AppState {
     pub port: u16,
     pub api_key: Option<String>,
     pub vault_path: std::path::PathBuf,
+}
+
+impl AppState {
+    /// The currently active LLM provider (may change after a config reload).
+    pub async fn provider(&self) -> Arc<dyn LlmProvider> {
+        self.runtime.read().await.provider.clone()
+    }
+
+    /// The currently active model name (may change after a config reload).
+    pub async fn model(&self) -> String {
+        self.runtime.read().await.model.clone()
+    }
 }
 
 async fn connection_tracker(state: axum::extract::State<AppState>, req: Request, next: Next) -> Response {

@@ -7,6 +7,7 @@
 pub mod agent;
 pub mod bus;
 pub mod config;
+pub mod config_watch;
 pub mod connectors;
 pub mod error;
 pub mod llm;

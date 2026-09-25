@@ -40,6 +40,23 @@ impl Paths {
         Self::data_dir().join("workspace")
     }
 
+    /// Legacy/XDG config location: ~/.config/alfred/config.toml
+    ///
+    /// Earlier releases stored the config here. The canonical location is
+    /// [`Paths::config_file`], but the hot-reload watcher also observes this
+    /// path so existing installs keep working.
+    pub fn alt_config_file() -> PathBuf {
+        if cfg!(target_os = "windows") {
+            std::env::var("APPDATA")
+                .map(|appdata| PathBuf::from(appdata).join("alfred").join("config.toml"))
+                .unwrap_or_else(|_| Self::config_file())
+        } else {
+            std::env::var("HOME")
+                .map(|home| PathBuf::from(home).join(".config").join("alfred").join("config.toml"))
+                .unwrap_or_else(|_| Self::config_file())
+        }
+    }
+
     pub fn config_file() -> PathBuf {
         Self::config_dir().join("config.toml")
     }
@@ -49,7 +66,7 @@ impl Paths {
     }
 
     pub fn log_file() -> PathBuf {
-        Self::logs_dir().join("server.log")
+        Self::logs_dir().join("alfred.log")
     }
 
     pub fn prompts_dir() -> PathBuf {

@@ -1,6 +1,6 @@
 use alfred::{
-    agent, config, connectors, llm, memory, paths, prompt, scheduler, server, store, tools, tui,
-    types, workitem,
+    agent, config, config_watch, connectors, llm, memory, paths, prompt, scheduler, server, store,
+    tools, tui, types, workitem,
 };
 
 use std::sync::Arc;
@@ -402,6 +402,17 @@ async fn run_server_mode(config_path: &Option<String>) {
         }));
     }
 
+    // Watch the config file(s) and apply changes without a restart.
+    let watch_paths = config_watch::watch_paths(std::path::Path::new(&config_path_str));
+    {
+        let path_list: Vec<String> = watch_paths.iter().map(|p| p.display().to_string()).collect();
+        info!("Watching config for changes: {}", path_list.join(", "));
+    }
+    let watch_state = state.clone();
+    handles.push(tokio::spawn(async move {
+        config_watch::watch_config(watch_state, watch_paths).await;
+    }));
+
     tokio::signal::ctrl_c().await.expect("failed to listen for ctrl-c");
     info!("Shutting down...");
 
@@ -433,11 +444,17 @@ async fn initialize_state(config: &config::AppConfig) -> Result<AppState, Box<dy
     let (event_tx, _) = tokio::sync::broadcast::channel(256);
     let bus = Arc::new(alfred::bus::MessageBus::new(256));
 
+    let runtime = Arc::new(tokio::sync::RwLock::new(server::RuntimeConfig {
+        provider_name: provider_name.clone(),
+        provider,
+        model,
+        scheduler_enabled: config.scheduler.enabled,
+    }));
+
     Ok(AppState {
         store,
         tools,
-        provider,
-        model,
+        runtime,
         system_prompt,
         event_tx,
         bus,
@@ -511,8 +528,8 @@ async fn run_dump_mode(
         let mut ctx = agent::AgentLoopContext {
             system_prompt: state.system_prompt.clone(),
             messages: history.clone(),
-            provider: state.provider.clone(),
-            model: state.model.clone(),
+            provider: state.provider().await,
+            model: state.model().await,
             tools: state.tools.clone(),
             event_tx: state.event_tx.clone(),
             max_turns: 10,

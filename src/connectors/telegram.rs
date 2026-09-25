@@ -177,8 +177,8 @@ impl TelegramConnector {
         let mut ctx = AgentLoopContext {
             system_prompt: self.state.system_prompt.clone(),
             messages,
-            provider: self.state.provider.clone(),
-            model: self.state.model.clone(),
+            provider: self.state.provider().await,
+            model: self.state.model().await,
             tools: self.state.tools.clone(),
             event_tx,
             max_turns: 5,

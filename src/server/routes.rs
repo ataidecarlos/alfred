@@ -82,8 +82,8 @@ pub async fn send_message(
     let mut ctx = AgentLoopContext {
         system_prompt: state.system_prompt.clone(),
         messages,
-        provider: state.provider.clone(),
-        model: state.model.clone(),
+        provider: state.provider().await,
+        model: state.model().await,
         tools: state.tools.clone(),
         event_tx,
         max_turns: 10,
