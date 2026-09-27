@@ -1,0 +1,27 @@
+# Pristine Alfred config used by the continuous e2e container.
+#
+# The API key is injected at runtime through the OPENCODE_GO_API_KEY
+# environment variable (see docker/e2e/run.sh, which reads it from the AKC
+# vault). No secret value is stored in this file or in the repository.
+
+[server]
+port = 3000
+host = "0.0.0.0"
+
+[llm]
+default_provider = "opencode-go"
+
+[llm.providers.opencode-go]
+api_key = "${OPENCODE_GO_API_KEY}"
+model = "space-bunny-free"
+base_url = "https://opencode.ai/zen/go/v1"
+
+[prompt]
+system_prompt_file = "/home/alfred/.alfred/config/prompts/system.md"
+user_prompt_file = "/home/alfred/.alfred/config/prompts/user.md"
+
+[scheduler]
+enabled = false
+
+[memory]
+enabled = false
