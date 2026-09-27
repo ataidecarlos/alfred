@@ -88,11 +88,12 @@ rm -f "$ENV_FILE"
 trap - EXIT
 
 # ── Wait for the container health check ───────────────────────────────
+healthy=0
 for _ in $(seq 1 60); do
     status="$("${DOCKER[@]}" inspect -f '{{.State.Health.Status}}' "$NAME" 2>/dev/null || echo starting)"
     if [ "$status" = "healthy" ]; then
-        echo "alfred-e2e healthy on host port ${HOST_PORT}"
-        exit 0
+        healthy=1
+        break
     fi
     if [ "$status" = "unhealthy" ]; then
         break
@@ -100,6 +101,14 @@ for _ in $(seq 1 60); do
     sleep 1
 done
 
-echo "error: ${NAME} did not become healthy" >&2
-"${DOCKER[@]}" logs --tail 50 "$NAME" >&2 || true
-exit 1
+if [ "$healthy" -ne 1 ]; then
+    echo "error: ${NAME} did not become healthy" >&2
+    "${DOCKER[@]}" logs --tail 50 "$NAME" >&2 || true
+    exit 1
+fi
+
+# Confirm the mapped endpoints answer on the host too.
+curl -fsS "http://localhost:${HOST_PORT}/health" >/dev/null
+curl -fsS "http://localhost:${HOST_PORT}/api/info" >/dev/null
+
+echo "alfred-e2e healthy on host port ${HOST_PORT}"
