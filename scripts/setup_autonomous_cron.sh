@@ -1,6 +1,6 @@
 #!/bin/bash
 # Setup autonomous development cron job for Alfred
-# Runs hourly to pick and implement work items
+# Runs every 30 minutes to pick and implement tickets
 
 set -e
 
@@ -37,7 +37,7 @@ OS="$(uname -s)"
 case "$OS" in
     Linux)
         echo "Setting up Linux cron job..."
-        CRON_CMD="0 * * * * $AGENT_RUNNER >> $LOG_FILE 2>&1"
+        CRON_CMD="*/30 * * * * $AGENT_RUNNER >> $LOG_FILE 2>&1"
         
         # Check if cron job already exists
         if crontab -l 2>/dev/null | grep -q "alfred.*autonomous"; then
@@ -66,7 +66,7 @@ case "$OS" in
         <string>$AGENT_RUNNER</string>
     </array>
     <key>StartInterval</key>
-    <integer>3600</integer>
+    <integer>1800</integer>
     <key>StandardOutPath</key>
     <string>$LOG_FILE</string>
     <key>StandardErrorPath</key>
@@ -97,9 +97,14 @@ EOF
     <CalendarTrigger>
       <StartBoundary>2024-01-01T00:00:00</StartBoundary>
       <Enabled>true</Enabled>
-      <ScheduleByHour>
-        <HoursInterval>1</HoursInterval>
-      </ScheduleByHour>
+      <ScheduleByDay>
+        <DaysInterval>1</DaysInterval>
+      </ScheduleByDay>
+      <Repetition>
+        <Interval>PT30M</Interval>
+        <Duration>P1D</Duration>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
     </CalendarTrigger>
   </Triggers>
   <Actions>
@@ -128,7 +133,7 @@ EOF
         
     *)
         echo "Unsupported OS: $OS"
-        echo "Please set up hourly cron manually:"
+        echo "Please set up a 30-minute cron manually:"
         echo "  $AGENT_RUNNER >> $LOG_FILE 2>&1"
         exit 1
         ;;
