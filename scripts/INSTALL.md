@@ -179,3 +179,68 @@ Check logs for errors:
 
 **Linux/Mac:** `~/.cache/alfred/server.log`
 **Windows:** `%LOCALAPPDATA%\alfred\cache\server.log`
+
+## Production VM (`azure-alfred`)
+
+Production Alfred runs on a dedicated Ubuntu VM instead of a developer machine.
+
+### Connect
+
+```bash
+ssh azure-alfred   # ataide-alfred.northeurope.cloudapp.azure.com
+```
+
+### Build from source
+
+```bash
+# Build prerequisites (once)
+sudo apt-get update
+sudo apt-get install -y build-essential pkg-config libssl-dev
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+source ~/.cargo/env
+
+# Clone and build
+git clone https://github.com/ataidecarlos/alfred.git ~/projects/alfred
+cd ~/projects/alfred
+cargo build --release
+./target/release/alfred --version
+```
+
+### Configuration
+
+`~/.alfred/config/config.toml` on the VM uses the OpenCode Go gateway:
+
+```toml
+[llm]
+default_provider = "opencode-go"
+
+[llm.providers.opencode-go]
+api_key = "${OPENCODE_GO_API_KEY}"
+model = "space-bunny-free"
+base_url = "https://opencode.ai/zen/go/v1"
+```
+
+`OPENCODE_GO_API_KEY` is injected at runtime from the AKC vault
+(`~/ataide-keychain`, key `OPENCODE_AZURE-DEV`) by the systemd wrapper — it is
+never written to `config.toml`.
+
+### systemd service
+
+```bash
+# /etc/systemd/system/alfred.service runs ~/.alfred/bin/alfred-server.sh
+sudo systemctl daemon-reload
+sudo systemctl enable --now alfred
+sudo systemctl status alfred
+curl localhost:8080/health
+```
+
+### Autonomous scheduler
+
+```bash
+bash scripts/setup_autonomous_cron.sh   # installs */30 * * * *
+crontab -l
+```
+
+See [DOGFOODING.md](../DOGFOODING.md) for the full deployment and scheduler
+reference.
+

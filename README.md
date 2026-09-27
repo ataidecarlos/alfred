@@ -124,8 +124,11 @@ Alfred uses Kira for ticket management. Kira is a shared ticketing system for AI
 
 ### Autonomous Development
 
+The autonomous agent runs every 30 minutes, pulls the highest-priority open
+ticket from Kira, implements it, and reports back.
+
 ```bash
-# Setup cron job
+# Setup cron job (installs */30 * * * *)
 bash scripts/setup_autonomous_cron.sh
 
 # Manual trigger
@@ -137,8 +140,33 @@ tail -f ~/.alfred/agent.log
 
 See [WORKITEMS.md](WORKITEMS.md) for full documentation.
 
+## Deployment
+
+Production Alfred runs on a dedicated VM rather than on a developer machine:
+
+| Item | Value |
+|------|-------|
+| SSH | `ssh azure-alfred` (`ataide-alfred.northeurope.cloudapp.azure.com`) |
+| Repo | `/home/azureuser/projects/alfred` |
+| Service | `alfred.service` (systemd, enabled at boot) |
+| Health | `curl localhost:8080/health` |
+| Logs | `~/.alfred/logs/alfred.log`, `~/.alfred/agent.log` |
+
+Build and install from source on the VM:
+
+```bash
+ssh azure-alfred
+git clone https://github.com/ataidecarlos/alfred.git ~/projects/alfred
+cd ~/projects/alfred && cargo build --release
+```
+
+Secrets (OpenCode Go API key, Kira token) live in the AKC vault on the VM and
+are injected at runtime. See [DOGFOODING.md](DOGFOODING.md) for the full
+deployment, scheduler, and troubleshooting details.
+
 ## Documentation
 
+- [DOGFOODING.md](DOGFOODING.md) - Production VM + autonomous scheduler setup
 - [INSTALL.md](scripts/INSTALL.md) - Detailed installation guide
 - [UPGRADE.md](scripts/UPGRADE.md) - Upgrade instructions
 - [RELEASE.md](scripts/RELEASE.md) - Release process
