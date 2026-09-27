@@ -8,7 +8,7 @@ Alfred is a lightweight AI agent that runs as a 24/7 server, providing automatio
 - **Laya decision layer**: a local confidence scorer answers routine requests directly and delegates everything else to the configured LLM
 - **Built-in tools**: Shell command, Webhook, Todo management
 - **Multiple interfaces**: REST API, Telegram connector, and a terminal UI (TUI) with a command palette and an interactive control center
-- **Work item system**: SQLite-backed tracker for autonomous development, with dependency resolution and automated verification
+- **Kira ticketing**: shared ticketing system for AI agents, with autonomous development support
 - **Scheduler CLI**: manage OS-level cron jobs (Linux/macOS) and Windows Task Scheduler entries from one interface
 - **Memory**: markdown memory vault with a SQLite index and Laya-aware retrieval
 - **Config hot-reload**: config file edits are applied without restarting the server
@@ -118,32 +118,21 @@ keywords above map onto Task Scheduler.
 | POST | `/api/memories` | Create a memory |
 | DELETE | `/api/memories/{id}` | Delete a memory |
 
-## Work Item System
+## Kira Ticketing System
 
-Alfred includes a work item system for autonomous development. Items live in the
-same SQLite database as the rest of Alfred's state (`~/.alfred/data/alfred.db`):
+Alfred uses Kira for ticket management. Kira is a shared ticketing system for AI agents across all projects.
+
+### Autonomous Development
 
 ```bash
-# List all work items
-alfred workitem list
+# Setup cron job
+bash scripts/setup_autonomous_cron.sh
 
-# Get next item to work on
-alfred workitem next
+# Manual trigger
+bash scripts/run_autonomous_agent.sh
 
-# Show details for one item
-alfred workitem show <ID>
-
-# Add a new work item
-alfred workitem add --title "My feature" --description "Details" --priority high
-
-# Assign to agent
-alfred workitem assign <ID> <AGENT_ID>
-
-# Update status
-alfred workitem update <ID> --status in_progress
-
-# Complete (runs the item's verification command automatically)
-alfred workitem complete <ID>
+# Monitor
+tail -f ~/.alfred/agent.log
 ```
 
 See [WORKITEMS.md](WORKITEMS.md) for full documentation.
@@ -154,7 +143,7 @@ See [WORKITEMS.md](WORKITEMS.md) for full documentation.
 - [UPGRADE.md](scripts/UPGRADE.md) - Upgrade instructions
 - [RELEASE.md](scripts/RELEASE.md) - Release process
 - [ROADMAP.md](ROADMAP.md) - Upcoming features
-- [WORKITEMS.md](WORKITEMS.md) - Work item system for autonomous development
+- [WORKITEMS.md](WORKITEMS.md) - Kira ticketing system for autonomous development
 
 ## Supported Providers
 

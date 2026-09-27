@@ -1,129 +1,58 @@
-# Work Items System
+# Kira Ticketing System
 
-Alfred uses a SQLite-based work item system for autonomous development. An AI agent runs hourly via cron, picks the next unblocked item, implements it, and updates status.
+Alfred uses Kira for ticket management. Kira is a shared ticketing system for AI agents across all projects.
 
-## Database Location
+## Access
 
-- **Work Items:** `~/.alfred/data/alfred.db`
-- **Agent Logs:** `~/.alfred/agent.log`
+- **Local (stdio mode):** Configured globally in `~/.config/opencode/opencode.jsonc`
+- **Available via:** `tools.kira.*`
 
-All Alfred state (conversations, todos, memories, work items) lives in the
-single SQLite database at `~/.alfred/data/alfred.db`. See `src/paths.rs`.
+## Tools
 
-## Work Item Schema
+| Tool | Description |
+|------|-------------|
+| `create_ticket(title, description, priority?, review_required?, tags?, repo, agent_type)` | Create ticket |
+| `claim_ticket(id, repo, agent_type)` | Claim OPEN ticket |
+| `update_status(id, status, repo, agent_type)` | Transition: OPEN → IN_PROGRESS → CLOSED |
+| `add_comment(ticket_id, body, repo, agent_type)` | Add comment |
+| `list_tickets(status?, repo?, agent_type?, tag?, priority?)` | List with filters |
+| `get_ticket(id)` | Full details with comments |
+| `my_tickets(repo, agent_type)` | Tickets claimed by this agent |
+| `stats()` | Counts by status/priority |
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | TEXT | UUID primary key |
-| `title` | TEXT | Short description |
-| `description` | TEXT | Detailed context |
-| `acceptance_criteria` | TEXT | JSON array of measurable goals |
-| `status` | TEXT | pending, in_progress, blocked, completed, failed |
-| `priority` | TEXT | critical, high, medium, low |
-| `category` | TEXT | infrastructure, feature, bug, experiment, refactor |
-| `assigned_agent` | TEXT | Agent ID (null if unassigned) |
-| `depends_on` | TEXT | JSON array of work item IDs |
-| `verification_command` | TEXT | Shell command to verify completion |
-| `estimated_effort` | TEXT | S, M, L, XL |
+## Identity
 
-## CLI Commands
+Agents self-report identity in tool args:
+- `repo`: `/home/azureuser/projects/alfred`
+- `agent_type`: `Build`
 
-### List Work Items
+## Workflow
 
-```bash
-# List all
-alfred workitem list
-
-# Filter by status
-alfred workitem list --status pending
-alfred workitem list --status in_progress
-alfred workitem list --status completed
+```
+OPEN → IN_PROGRESS → CLOSED
 ```
 
-### Get Next Item
+## Priority Rules
 
-```bash
-alfred workitem next
-```
-
-Returns highest priority unblocked pending item.
-
-### Show Details
-
-```bash
-alfred workitem show <ID>
-```
-
-### Add Work Item
-
-```bash
-alfred workitem add \
-    --title "My feature" \
-    --description "Detailed description" \
-    --priority high \
-    --category feature \
-    --effort M \
-    --verification "cargo test" \
-    --depends "ID1,ID2"
-```
-
-### Assign to Agent
-
-```bash
-alfred workitem assign <ID> <AGENT_ID>
-```
-
-### Update Status
-
-```bash
-alfred workitem update <ID> --status in_progress --note "Starting work"
-```
-
-### Complete Work Item
-
-Completing an item automatically runs its `verification_command` (when set):
-
-- exit `0` → item is marked `completed`, output is recorded
-- exit `!= 0` → item is marked `failed`, output is logged, command exits non-zero
-
-```bash
-alfred workitem complete <ID>
-```
-
-`--verification "<text>"` is still accepted and is recorded as the output when
-the item has no `verification_command`:
-
-```bash
-alfred workitem complete <ID> --verification "manual check ok"
-```
-
-### Log Progress
-
-```bash
-alfred workitem log <ID> --note "Implemented auth middleware"
-```
+- **Project tasks:** LOW (default), MEDIUM (if has dependencies)
+- **HOST tasks:** HIGH (default), CRITICAL (security concern + complete blocker)
 
 ## Autonomous Workflow
 
 ### Setup
 
 ```bash
-# Build release
-cargo build --release
-
-# Setup cron job
+# Setup cron job (runs every 30 minutes: */30 * * * *)
 bash scripts/setup_autonomous_cron.sh
 
 # Verify
 crontab -l  # Linux
-launchctl list | grep alfred  # macOS
 ```
 
-### Manual Trigger
+The scheduler runs every 30 minutes (`*/30 * * * *`). Each run lists the open
+tickets in Kira, claims the highest-priority one, and works it to completion.
 
-The cron job invokes the wrapper script, which sets up the environment, checks
-for pending work items, and runs the autonomous agent via `opencode run` with
-`prompts/autonomous_developer.md` attached.
+### Manual Trigger
 
 ```bash
 bash scripts/run_autonomous_agent.sh
@@ -135,56 +64,28 @@ bash scripts/run_autonomous_agent.sh
 # Watch agent log
 tail -f ~/.alfred/agent.log
 
-# Check work item status
-alfred workitem list --status in_progress
+# Check ticket status
+# Use tools.kira.list_tickets in an opencode session
 ```
 
-## Priority Levels
+## Error Handling
 
-| Priority | Description |
-|----------|-------------|
-| **critical** | Must be done first, blocks everything |
-| **high** | Important, do before medium/low |
-| **medium** | Normal priority |
-| **low** | Nice to have, do last |
+If the autonomous agent encounters an error it cannot fix:
+1. Create a HIGH priority ticket with error details
+2. Exit cleanly
+3. Next run will pick up the error ticket
 
-## Status Flow
+## Migration from Alfred Workitems
 
-```
-pending → in_progress → completed
-    ↓           ↓
-  blocked     failed
-```
-
-## Dependencies
-
-Work items can depend on other items:
+To migrate existing Alfred workitems to Kira:
 
 ```bash
-# Item B depends on Item A
-alfred workitem add --title "Item A" --category infrastructure
-# Returns: UUID-A
-
-alfred workitem add --title "Item B" --depends "UUID-A" --category feature
+bash scripts/migrate_workitems_to_kira.sh
 ```
 
-Item B won't appear in `alfred workitem next` until Item A is completed.
+Then use Kira MCP tools to create tickets from the exported data.
 
-## Adding New Work Items
+## Database
 
-1. Define clear acceptance criteria
-2. Set appropriate priority
-3. Choose category
-4. Add verification command
-5. Estimate effort (S/M/L/XL)
-
-Example:
-```bash
-alfred workitem add \
-    --title "Add user authentication" \
-    --description "Implement JWT-based auth with login, register, and logout endpoints" \
-    --priority high \
-    --category feature \
-    --effort L \
-    --verification "curl -X POST localhost:3000/api/auth/login -d '{"email":"test@test.com","password":"test"}' | grep -q token"
-```
+- **Kira database:** `~/.opencode/kira.db` (WAL mode, never erased)
+- **Agent logs:** `~/.alfred/agent.log`

@@ -79,8 +79,8 @@
 - Obsidian-friendly vault structure
 
 ### Platform & Developer Tooling (v2026.09.25)
-- Work item system: SQLite-backed tracker for autonomous development, with
-  dependency resolution, automated verification, and the `alfred workitem` CLI
+- Kira ticketing: shared ticketing system for AI agents, with autonomous
+  development support via cron jobs
 - Scheduler CLI: OS-agnostic management of cron jobs (Linux/macOS) and Windows
   Task Scheduler entries via `alfred scheduler`
 - TUI control center: `Ctrl+K` panel for managing scheduler jobs, todos,
