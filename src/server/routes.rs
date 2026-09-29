@@ -1,10 +1,17 @@
+use std::sync::OnceLock;
+
 use axum::extract::{Path, State, Json};
 use axum::http::StatusCode;
 use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
 use axum::extract::FromRequestParts;
+use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 
+use crate::config::{JobsConfig, PiConfig};
+use crate::error::AlfredError;
+use crate::jobs::{Job, JobKind, JobRun, NewJob, ReportPolicy};
+use crate::memory;
 use crate::server::AppState;
 
 pub struct AuthUser;
@@ -28,6 +35,47 @@ impl FromRequestParts<AppState> for AuthUser {
     }
 }
 
+/// A REST failure: an HTTP status plus a plain-text message body.
+///
+/// A malformed cron or a below-floor watch interval is a `400` carrying the
+/// validation message, an unknown job is a `404`, and every other failure is a
+/// `500` carrying the error text.
+pub struct ApiError {
+    status: StatusCode,
+    message: String,
+}
+
+impl ApiError {
+    fn new(status: StatusCode, message: impl Into<String>) -> Self {
+        Self { status, message: message.into() }
+    }
+}
+
+impl From<AlfredError> for ApiError {
+    fn from(error: AlfredError) -> Self {
+        match error {
+            AlfredError::JobNotFound(id) => {
+                ApiError::new(StatusCode::NOT_FOUND, format!("job not found: {id}"))
+            }
+            AlfredError::JobNameExists => {
+                ApiError::new(StatusCode::CONFLICT, "job name already exists")
+            }
+            AlfredError::JobValidation(message) => ApiError::new(StatusCode::BAD_REQUEST, message),
+            AlfredError::WatchIntervalTooShort(secs) => ApiError::new(
+                StatusCode::BAD_REQUEST,
+                format!("minimum watch interval is {secs}s"),
+            ),
+            other => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, other.to_string()),
+        }
+    }
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        (self.status, self.message).into_response()
+    }
+}
+
 pub async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({"status": "ok"}))
 }
@@ -38,15 +86,57 @@ pub struct ServerInfo {
     pub port: u16,
     pub uptime_secs: u64,
     pub active_connections: usize,
+    /// The probed Pi version, or `null` when Pi is not on PATH.
+    pub pi_version: Option<String>,
+    /// Number of jobs currently enabled.
+    pub jobs_enabled: usize,
 }
 
-pub async fn server_info(State(state): State<AppState>) -> Json<ServerInfo> {
-    Json(ServerInfo {
+pub async fn server_info(State(state): State<AppState>) -> Result<Json<ServerInfo>, ApiError> {
+    let jobs_enabled = state
+        .store
+        .list_jobs()?
+        .into_iter()
+        .filter(|job| job.enabled)
+        .count();
+
+    Ok(Json(ServerInfo {
         pid: std::process::id(),
         port: state.port,
         uptime_secs: state.start_time.elapsed().as_secs(),
         active_connections: state.active_connections.load(std::sync::atomic::Ordering::Relaxed),
-    })
+        pi_version: probe_pi_version(),
+        jobs_enabled,
+    }))
+}
+
+/// Probe the Pi version once and cache it for the life of the process.
+///
+/// The binary is the `[pi].binary` default (`"pi"`); carrying the live
+/// `[pi]`/`[jobs]` config into the API is the startup-wiring issue, so until
+/// then the defaults apply. A missing or failing binary reports `None`, never an
+/// error: `/api/info` must stay healthy even when Pi is absent.
+fn probe_pi_version() -> Option<String> {
+    static VERSION: OnceLock<Option<String>> = OnceLock::new();
+    VERSION
+        .get_or_init(|| {
+            let binary = PiConfig::default().binary;
+            let output = std::process::Command::new(&binary)
+                .arg("--version")
+                .output()
+                .ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            let text = String::from_utf8_lossy(&output.stdout);
+            let version = text.trim();
+            if version.is_empty() {
+                None
+            } else {
+                Some(version.to_string())
+            }
+        })
+        .clone()
 }
 
 #[derive(Serialize)]
@@ -152,4 +242,167 @@ pub async fn complete_todo(
         Ok(false) => Err(StatusCode::NOT_FOUND),
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
+}
+
+// ---------------------------------------------------------------- jobs
+
+/// The JSON body accepted when creating or replacing a job.
+///
+/// Optional fields fall back to the same defaults as [`NewJob::default`], so
+/// the minimal body `{"name","kind","prompt",...}` is valid.
+#[derive(Deserialize)]
+pub struct JobBody {
+    pub name: String,
+    pub kind: JobKind,
+    #[serde(default)]
+    pub schedule: Option<String>,
+    #[serde(default)]
+    pub run_at: Option<i64>,
+    pub prompt: String,
+    #[serde(default)]
+    pub report: Option<ReportPolicy>,
+    #[serde(default)]
+    pub deliver_to: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub tools: Vec<String>,
+    #[serde(default = "default_job_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+fn default_job_timeout_secs() -> u64 {
+    NewJob::default().timeout_secs
+}
+
+impl From<JobBody> for NewJob {
+    fn from(body: JobBody) -> Self {
+        NewJob {
+            name: body.name,
+            kind: body.kind,
+            schedule: body.schedule,
+            run_at: body.run_at,
+            prompt: body.prompt,
+            report: body.report.unwrap_or(ReportPolicy::OnSignal),
+            deliver_to: body.deliver_to,
+            model: body.model,
+            tools: body.tools,
+            timeout_secs: body.timeout_secs,
+        }
+    }
+}
+
+/// The configured watch floor. Startup wiring that carries the live `[jobs]`
+/// config into the API is a later issue; until then the default (900s) applies.
+fn min_watch_interval_secs() -> u64 {
+    JobsConfig::default().min_watch_interval_secs
+}
+
+pub async fn list_jobs(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+) -> Result<Json<Vec<Job>>, ApiError> {
+    Ok(Json(state.store.list_jobs()?))
+}
+
+pub async fn create_job(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    Json(body): Json<JobBody>,
+) -> Result<(StatusCode, Json<Job>), ApiError> {
+    let job = state.store.add_job(&body.into(), min_watch_interval_secs())?;
+    Ok((StatusCode::CREATED, Json(job)))
+}
+
+pub async fn get_job(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    Path(id): Path<String>,
+) -> Result<Json<Job>, ApiError> {
+    Ok(Json(state.store.get_job(&id)?))
+}
+
+pub async fn update_job(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    Path(id): Path<String>,
+    Json(body): Json<JobBody>,
+) -> Result<Json<Job>, ApiError> {
+    Ok(Json(
+        state.store.update_job(&id, &body.into(), min_watch_interval_secs())?,
+    ))
+}
+
+pub async fn delete_job(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    state.store.delete_job(&id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Request a manual run of a job.
+///
+/// The job runner and the scheduler loop are separate issues, so until they
+/// land there is nothing to dispatch to: a known job answers `501` rather than
+/// fabricating a run row. An unknown id still answers `404`.
+pub async fn run_job(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    state.store.get_job(&id)?;
+    Err(ApiError::new(
+        StatusCode::NOT_IMPLEMENTED,
+        "manual runs are not available until the job runner lands",
+    ))
+}
+
+pub async fn list_job_runs(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<JobRun>>, ApiError> {
+    let limit = JobsConfig::default().max_runs_per_job;
+    Ok(Json(state.store.runs_for(&id, limit)?))
+}
+
+// ------------------------------------------------------------ memories
+
+#[derive(Serialize)]
+pub struct MemoryItem {
+    pub slug: String,
+    pub text: String,
+}
+
+pub async fn list_memories(_auth: AuthUser) -> Json<Vec<MemoryItem>> {
+    Json(
+        memory::list_memories()
+            .into_iter()
+            .map(|(slug, text)| MemoryItem { slug, text })
+            .collect(),
+    )
+}
+
+#[derive(Deserialize)]
+pub struct AddMemoryRequest {
+    #[serde(alias = "content")]
+    pub text: String,
+}
+
+pub async fn add_memory(
+    _auth: AuthUser,
+    Json(req): Json<AddMemoryRequest>,
+) -> Result<StatusCode, ApiError> {
+    memory::append_memory(&req.text)?;
+    Ok(StatusCode::CREATED)
+}
+
+pub async fn delete_memory(
+    _auth: AuthUser,
+    Path(slug): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    memory::delete_memory(&slug)?;
+    Ok(StatusCode::NO_CONTENT)
 }
