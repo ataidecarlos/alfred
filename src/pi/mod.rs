@@ -10,6 +10,11 @@
 
 pub mod client;
 pub mod invocation;
+pub mod session;
 
 pub use client::{JsonlReader, PiClient, PiResponse};
 pub use invocation::PiInvocation;
+pub use session::{
+    compact_request, run_compaction_ticker, CompactPolicy, CompactionTarget, Session,
+    SessionSupervisor, TickOutcome, COMPACT_TICK,
+};

@@ -7,11 +7,12 @@
 //!
 //! # Session lifecycle
 //!
-//! [`Session`] keeps [`start`](Session::start) and [`send`](Session::send)
-//! separate so the per-channel supervisor and idle-based compaction in issue
-//! #14 can own process lifecycle without touching the send path. For now the
-//! connector starts a process lazily on the first message and restarts it
-//! after a failure.
+//! [`Session`] (re-exported from [`crate::pi::session`]) keeps
+//! [`start`](Session::start) and [`send`](Session::send) separate. The connector
+//! starts a process lazily on the first message and restarts it after a
+//! failure; the idle-based supervisor built on the same session lives in
+//! [`crate::pi::session`] and is ticked by [`run_compaction_ticker`] from
+//! [`TelegramConnector::start`].
 //!
 //! # Testability
 //!
@@ -28,7 +29,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
@@ -36,8 +37,12 @@ use crate::connectors::Connector;
 use crate::error::AlfredError;
 use crate::memory::append_memory_at;
 use crate::paths::Paths;
-use crate::pi::{PiClient, PiInvocation};
+use crate::pi::session::{run_compaction_ticker, CompactPolicy, COMPACT_TICK};
+use crate::pi::PiInvocation;
 use crate::server::AppState;
+
+/// Re-export the channel session so connectors and tests name it here.
+pub use crate::pi::session::Session;
 
 /// The Pi channel name. One session per channel; issue #14 turns this into a
 /// supervisor keyed by the same name.
@@ -145,121 +150,6 @@ struct SendMessageRequest {
     text: String,
 }
 
-/// One channel's Pi RPC session.
-///
-/// `start` spawns the subprocess and `send` submits a prompt and streams the
-/// reply. Keeping them separate lets issue #14's supervisor restart, compact,
-/// and shut down sessions without changing the send path.
-pub struct Session {
-    invocation: PiInvocation,
-    client: Option<PiClient>,
-    dead: bool,
-}
-
-impl Session {
-    pub fn new(invocation: PiInvocation) -> Self {
-        Self { invocation, client: None, dead: false }
-    }
-
-    /// A session is alive once its process is running and has not failed.
-    pub fn is_alive(&self) -> bool {
-        self.client.is_some() && !self.dead
-    }
-
-    /// Spawn the Pi subprocess for this channel.
-    pub async fn start(&mut self) -> Result<(), AlfredError> {
-        let client =
-            PiClient::spawn(&self.invocation.binary, self.invocation.command()).await?;
-        self.client = Some(client);
-        self.dead = false;
-        Ok(())
-    }
-
-    /// Mark the process dead and drop it, so the next message restarts it.
-    pub fn mark_dead(&mut self) {
-        self.dead = true;
-        self.client = None;
-    }
-
-    /// Send `prompt` and return the assistant text streamed back before the
-    /// agent settled.
-    pub async fn send(&mut self, prompt: &str) -> Result<String, AlfredError> {
-        let client = self
-            .client
-            .as_mut()
-            .ok_or_else(|| AlfredError::Pi("channel session is not started".to_string()))?;
-
-        let response = client
-            .request(json!({"type": "prompt", "message": prompt}))
-            .await?;
-        if !response.success {
-            return Err(AlfredError::Pi(format!(
-                "prompt rejected: {}",
-                response.error.unwrap_or_else(|| "unknown error".to_string())
-            )));
-        }
-
-        let mut reply = String::new();
-        loop {
-            let message = client.next_message().await?;
-            match message.get("type").and_then(Value::as_str) {
-                Some("message_update") => {
-                    if let Some(delta) = delta_text(&message) {
-                        reply.push_str(delta);
-                    }
-                }
-                Some("agent_settled") => break,
-                _ => {}
-            }
-        }
-
-        // A reply can arrive without a text delta (for example, only a final
-        // message); fall back to Pi's last assistant text in that case.
-        if reply.trim().is_empty() {
-            let fallback = client
-                .request(json!({"type": "get_last_assistant_text"}))
-                .await?;
-            if fallback.success {
-                if let Some(text) = fallback
-                    .data
-                    .as_ref()
-                    .and_then(|data| data.get("text"))
-                    .and_then(Value::as_str)
-                {
-                    reply = text.to_string();
-                }
-            }
-        }
-
-        Ok(reply)
-    }
-
-    /// Clear the conversation by sending `new_session`.
-    pub async fn new_session(&mut self) -> Result<(), AlfredError> {
-        let client = self
-            .client
-            .as_mut()
-            .ok_or_else(|| AlfredError::Pi("channel session is not started".to_string()))?;
-        let response = client.request(json!({"type": "new_session"})).await?;
-        if !response.success {
-            return Err(AlfredError::Pi(format!(
-                "new_session rejected: {}",
-                response.error.unwrap_or_else(|| "unknown error".to_string())
-            )));
-        }
-        Ok(())
-    }
-}
-
-/// The text delta carried by a `message_update` event, if any.
-fn delta_text(message: &Value) -> Option<&str> {
-    let event = message.get("assistantMessageEvent")?;
-    if event.get("type").and_then(Value::as_str) != Some("text_delta") {
-        return None;
-    }
-    event.get("delta").and_then(Value::as_str)
-}
-
 pub struct TelegramConnector {
     client: Client,
     bot_token: String,
@@ -268,7 +158,8 @@ pub struct TelegramConnector {
     invocation: PiInvocation,
     sender: Arc<dyn MessageSender>,
     memories_file: PathBuf,
-    sessions: Mutex<HashMap<String, Session>>,
+    sessions: Arc<Mutex<HashMap<String, Session>>>,
+    policy: CompactPolicy,
 }
 
 impl TelegramConnector {
@@ -293,7 +184,8 @@ impl TelegramConnector {
             state,
             invocation,
             Paths::memories_file(),
-        ))
+        )
+        .with_compaction_policy(CompactPolicy::from(pi)))
     }
 
     /// Assemble the connector from explicit parts. Used by [`new`] and by
@@ -314,8 +206,15 @@ impl TelegramConnector {
             invocation,
             sender,
             memories_file,
-            sessions: Mutex::new(HashMap::new()),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+            policy: CompactPolicy::default(),
         }
+    }
+
+    /// Replace the compaction policy (tests set an explicit idle window).
+    pub fn with_compaction_policy(mut self, policy: CompactPolicy) -> Self {
+        self.policy = policy;
+        self
     }
 
     /// Replace the outbound transport (tests inject a recorder).
@@ -401,6 +300,20 @@ impl TelegramConnector {
         }
     }
 
+    /// Start the per-channel compaction ticker.
+    ///
+    /// Every [`COMPACT_TICK`] one supervisor pass runs against each session and
+    /// compacts it when it has been idle past `idle_compact_secs` or its context
+    /// exceeds `compact_token_threshold`. The ticker holds a clone of the shared
+    /// session map; the sessions (and therefore their child processes, which
+    /// `PiClient` marks `kill_on_drop`) are terminated when the runtime shuts
+    /// down.
+    fn spawn_compaction_ticker(&self) {
+        let sessions = Arc::clone(&self.sessions);
+        let policy = self.policy;
+        tokio::spawn(run_compaction_ticker(sessions, policy, COMPACT_TICK));
+    }
+
     async fn handle_update(&self, update: Update) -> Result<(), AlfredError> {
         let msg = match update.message {
             Some(m) => m,
@@ -484,6 +397,7 @@ impl TelegramConnector {
 impl Connector for TelegramConnector {
     async fn start(&self) -> Result<(), AlfredError> {
         info!("Starting Telegram connector...");
+        self.spawn_compaction_ticker();
         let mut offset: i64 = 0;
 
         loop {
@@ -550,21 +464,5 @@ mod tests {
 
         // An empty reply is still one (empty) chunk.
         assert_eq!(chunk_message("", MAX_MESSAGE_LEN), vec![String::new()]);
-    }
-
-    #[test]
-    fn delta_text_extracts_only_text_deltas() {
-        let delta = json!({
-            "type": "message_update",
-            "assistantMessageEvent": { "type": "text_delta", "delta": "hi" },
-        });
-        assert_eq!(delta_text(&delta), Some("hi"));
-
-        let other = json!({
-            "type": "message_update",
-            "assistantMessageEvent": { "type": "tool_call", "delta": "hi" },
-        });
-        assert_eq!(delta_text(&other), None);
-        assert_eq!(delta_text(&json!({"type": "agent_settled"})), None);
     }
 }
