@@ -2,8 +2,8 @@
 //!
 //! A lightweight polling watcher (1s interval) observes the active config file
 //! and the legacy XDG location. When either changes, the config is re-read and
-//! the runtime LLM provider, model, API key and scheduler flag are updated in
-//! place — no server restart required.
+//! validated; a malformed file is rejected and the previous configuration is
+//! retained rather than taking the server down.
 //!
 //! Polling is used deliberately: it needs no extra dependency, behaves the same
 //! on every platform, and keeps detection well inside the 5 second budget.
@@ -13,11 +13,9 @@ use std::time::{Duration, SystemTime};
 
 use tracing::{info, warn};
 
-use crate::config::{load_config, AppConfig};
+use crate::config::load_config;
 use crate::error::AlfredError;
-use crate::llm::create_provider;
 use crate::paths::Paths;
-use crate::server::AppState;
 
 /// How often the config file's modification time is checked.
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -41,8 +39,8 @@ fn modified(path: &Path) -> Option<SystemTime> {
     std::fs::metadata(path).and_then(|meta| meta.modified()).ok()
 }
 
-/// Poll `paths` forever, reloading the configuration whenever one changes.
-pub async fn watch_config(state: AppState, paths: Vec<PathBuf>) {
+/// Poll `paths` forever, re-validating the configuration whenever one changes.
+pub async fn watch_config(paths: Vec<PathBuf>) {
     let mut observed: Vec<(PathBuf, Option<SystemTime>)> = paths
         .into_iter()
         .map(|path| {
@@ -61,117 +59,39 @@ pub async fn watch_config(state: AppState, paths: Vec<PathBuf>) {
             let current = modified(path);
             if current != *previous {
                 *previous = current;
-                reload(&state, path).await;
+                match reload(path).await {
+                    Ok(()) => info!("Config reloaded from {}", path.display()),
+                    Err(e) => warn!(
+                        "Config change in {} rejected; previous configuration retained: {}",
+                        path.display(),
+                        e
+                    ),
+                }
             }
         }
     }
 }
 
-/// Re-read `path` and, on success, swap the runtime configuration.
-///
-/// A reload is logged even when parsing fails: the change was detected and the
-/// previous configuration is retained, which is more useful than silence.
-async fn reload(state: &AppState, path: &Path) {
-    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
-
-    match load_config(path) {
-        Ok(config) => match apply(state, &config).await {
-            Ok(()) => info!("Config reloaded at {}", now),
-            Err(e) => warn!(
-                "Config reloaded at {} (could not apply changes, previous configuration retained: {})",
-                now, e
-            ),
-        },
-        Err(e) => info!(
-            "Config reloaded at {} (could not read {}: {}; previous configuration retained)",
-            now,
-            path.display(),
-            e
-        ),
-    }
-}
-
-/// Apply a freshly loaded config to the live runtime state.
-async fn apply(state: &AppState, config: &AppConfig) -> Result<(), AlfredError> {
-    let provider_name = config.llm.default_provider.clone();
-    let provider_config = config
-        .llm
-        .providers
-        .get(&provider_name)
-        .ok_or_else(|| AlfredError::Config(format!("provider '{}' not found in config", provider_name)))?;
-
-    // Recreate the provider so API key / base_url changes take effect.
-    let provider = create_provider(&provider_name, provider_config)?;
-    let model = provider_config.model.clone();
-
-    let mut runtime = state.runtime.write().await;
-    let scheduler_changed = runtime.scheduler_enabled != config.scheduler.enabled;
-
-    runtime.provider_name = provider_name;
-    runtime.provider = provider;
-    runtime.model = model;
-    runtime.scheduler_enabled = config.scheduler.enabled;
-    drop(runtime);
-
-    if scheduler_changed {
-        warn!(
-            "Scheduler enabled changed to {}; scheduler job set is refreshed on the next restart",
-            config.scheduler.enabled
-        );
-    }
-
-    Ok(())
+/// Re-read and validate `path`.
+pub async fn reload(path: &Path) -> Result<(), AlfredError> {
+    load_config(path).map(|_| ())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicUsize;
-    use std::sync::Arc;
 
-    fn write_config(dir: &Path, model: &str) -> PathBuf {
+    fn write_config(dir: &Path, host: &str) -> PathBuf {
         let path = dir.join("config.toml");
         std::fs::write(
             &path,
             format!(
-                "[server]\nport = 8080\n\n[llm]\ndefault_provider = \"openai\"\n\n\
-                 [llm.providers.openai]\napi_key = \"test-key\"\nmodel = \"{}\"\n\n[prompt]\n",
-                model
+                "[server]\nport = 8080\nhost = \"{}\"\n\n[prompt]\nsystem_prompt_file = \"system.md\"\nuser_prompt_file = \"user.md\"\n",
+                host
             ),
         )
         .unwrap();
         path
-    }
-
-    fn test_state(dir: &Path, config: &AppConfig) -> AppState {
-        let store = Arc::new(crate::store::Store::new(&dir.join("test.db")).unwrap());
-        let tools = Arc::new(crate::tools::register_builtins(store.clone()));
-        let (event_tx, _) = tokio::sync::broadcast::channel(16);
-        let provider_config = config
-            .llm
-            .providers
-            .get(&config.llm.default_provider)
-            .unwrap();
-        let provider = create_provider(&config.llm.default_provider, provider_config).unwrap();
-
-        AppState {
-            store,
-            tools,
-            runtime: Arc::new(tokio::sync::RwLock::new(crate::server::RuntimeConfig {
-                provider_name: config.llm.default_provider.clone(),
-                provider,
-                model: provider_config.model.clone(),
-                scheduler_enabled: config.scheduler.enabled,
-            })),
-            system_prompt: String::new(),
-            event_tx,
-            bus: Arc::new(crate::bus::MessageBus::new(16)),
-            start_time: std::time::Instant::now(),
-            active_connections: Arc::new(AtomicUsize::new(0)),
-            port: 0,
-            api_key: None,
-            vault_path: dir.to_path_buf(),
-        }
     }
 
     #[test]
@@ -184,30 +104,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn apply_swaps_provider_and_model() {
+    async fn reload_accepts_valid_config() {
         let dir = tempfile::tempdir().unwrap();
-        let path = write_config(dir.path(), "model-a");
-        let state = test_state(dir.path(), &load_config(&path).unwrap());
-        assert_eq!(state.model().await, "model-a");
-
-        let next = write_config(dir.path(), "model-b");
-        apply(&state, &load_config(&next).unwrap()).await.unwrap();
-
-        assert_eq!(state.model().await, "model-b");
-        assert_eq!(state.runtime.read().await.provider_name, "openai");
+        let path = write_config(dir.path(), "127.0.0.1");
+        assert!(reload(&path).await.is_ok());
     }
 
     #[tokio::test]
-    async fn invalid_reload_retains_previous_configuration() {
+    async fn reload_rejects_invalid_config() {
         let dir = tempfile::tempdir().unwrap();
-        let path = write_config(dir.path(), "model-a");
-        let state = test_state(dir.path(), &load_config(&path).unwrap());
-
-        // The verification workflow appends a non-TOML line; a malformed file
-        // must not take the running server down or wipe the active config.
+        let path = dir.path().join("config.toml");
+        // A malformed file must be rejected rather than taking the server down.
         std::fs::write(&path, "[server\nnot valid toml").unwrap();
-        reload(&state, &path).await;
-
-        assert_eq!(state.model().await, "model-a");
+        assert!(reload(&path).await.is_err());
     }
 }

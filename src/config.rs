@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::Path;
 
 use serde::Deserialize;
@@ -9,14 +8,13 @@ use crate::paths::Paths;
 #[derive(Debug, Deserialize)]
 pub struct AppConfig {
     pub server: ServerConfig,
-    pub llm: LlmConfig,
     #[serde(default)]
     pub telegram: Option<TelegramConfig>,
     pub prompt: PromptConfig,
     #[serde(default)]
-    pub scheduler: SchedulerConfig,
+    pub pi: PiConfig,
     #[serde(default)]
-    pub memory: MemoryConfig,
+    pub jobs: JobsConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -27,20 +25,9 @@ pub struct ServerConfig {
     pub host: String,
     #[serde(default = "default_db_path")]
     pub db_path: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct LlmConfig {
-    #[serde(default = "default_provider")]
-    pub default_provider: String,
-    pub providers: HashMap<String, ProviderConfig>,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct ProviderConfig {
+    /// Bearer token required by the REST surface when set.
+    #[serde(default)]
     pub api_key: Option<String>,
-    pub model: String,
-    pub base_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,54 +45,55 @@ pub struct PromptConfig {
     pub user_prompt_file: String,
 }
 
+/// How Alfred invokes the Pi subprocess.
 #[derive(Debug, Deserialize)]
-pub struct SchedulerConfig {
-    #[serde(default = "default_true")]
-    pub enabled: bool,
+pub struct PiConfig {
+    #[serde(default = "default_pi_binary")]
+    pub binary: String,
+    #[serde(default = "default_pi_api_key_env")]
+    pub api_key_env: String,
+    #[serde(default)]
+    pub provider: String,
+    #[serde(default)]
+    pub model: String,
+    #[serde(default = "default_pi_thinking")]
+    pub thinking: String,
+    #[serde(default)]
+    pub jobs_tools: Vec<String>,
+    #[serde(default)]
+    pub channel_tools: Vec<String>,
+    #[serde(default = "default_pi_timeout_secs")]
+    pub timeout_secs: u64,
+    #[serde(default = "default_idle_compact_secs")]
+    pub idle_compact_secs: u64,
+    #[serde(default = "default_compact_token_threshold")]
+    pub compact_token_threshold: u64,
+    #[serde(default = "default_pi_session_dir")]
+    pub session_dir: String,
+    #[serde(default)]
+    pub extra_args: Vec<String>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct MemoryConfig {
-    #[serde(default = "default_memory_enabled")]
+/// Scheduling policy for the job model.
+#[derive(Debug, Deserialize)]
+pub struct JobsConfig {
+    #[serde(default = "default_true")]
     pub enabled: bool,
-    #[serde(default = "default_vault_path")]
-    pub vault_path: String,
-    #[serde(default = "default_memory_mode")]
-    pub mode: String,
-    #[serde(default = "default_cli_check_interval")]
-    pub cli_check_interval_secs: u64,
-    #[serde(default = "default_retrieval_threshold")]
-    pub retrieval_review_threshold_days: i64,
-    #[serde(default = "default_distillation_interval")]
-    pub distillation_interval_secs: u64,
-    #[serde(default = "default_cloud_provider")]
-    pub cloud_provider: String,
-    #[serde(default = "default_cloud_model")]
-    pub cloud_model: String,
-    #[serde(default = "default_cloud_limit")]
-    pub cloud_monthly_limit: f64,
-    #[serde(default)]
-    pub local_preprocessing: bool,
-    #[serde(default = "default_local_backend")]
-    pub local_backend: String,
-    #[serde(default = "default_local_model")]
-    pub local_model: String,
-    #[serde(default)]
-    pub full_local: bool,
-    #[serde(default = "default_local_llm_provider")]
-    pub local_llm_provider: String,
-    #[serde(default = "default_local_llm_url")]
-    pub local_llm_base_url: String,
-    #[serde(default = "default_local_llm_model")]
-    pub local_llm_model: String,
+    #[serde(default = "default_max_concurrent")]
+    pub max_concurrent: usize,
+    #[serde(default = "default_min_watch_interval_secs")]
+    pub min_watch_interval_secs: u64,
+    #[serde(default = "default_max_runs_per_job")]
+    pub max_runs_per_job: usize,
+    #[serde(default = "default_missing_verdict")]
+    pub missing_verdict: String,
 }
 
 fn default_port() -> u16 { 8080 }
-fn default_host() -> String { "0.0.0.0".into() }
+fn default_host() -> String { "127.0.0.1".into() }
 fn default_db_path() -> String {
     Paths::database_file().to_string_lossy().to_string()
 }
-fn default_provider() -> String { "openai".into() }
 fn default_system_prompt_path() -> String {
     Paths::system_prompt_file().to_string_lossy().to_string()
 }
@@ -114,56 +102,48 @@ fn default_user_prompt_path() -> String {
 }
 fn default_true() -> bool { true }
 
-fn default_memory_enabled() -> bool { true }
-fn default_vault_path() -> String {
-    if cfg!(target_os = "windows") {
-        std::env::var("USERPROFILE")
-            .map(|home| format!("{}\\alfred", home))
-            .unwrap_or_else(|_| "C:\\Users\\alfred".into())
-    } else {
-        std::env::var("HOME")
-            .map(|home| format!("{}/alfred", home))
-            .unwrap_or_else(|_| "/home/user/alfred".into())
-    }
+fn default_pi_binary() -> String { "pi".into() }
+fn default_pi_api_key_env() -> String { "PI_API_KEY".into() }
+fn default_pi_thinking() -> String { "off".into() }
+fn default_pi_timeout_secs() -> u64 { 900 }
+fn default_idle_compact_secs() -> u64 { 300 }
+fn default_compact_token_threshold() -> u64 { 100_000 }
+fn default_pi_session_dir() -> String {
+    Paths::pi_dir().join("sessions").to_string_lossy().to_string()
 }
-fn default_memory_mode() -> String { "auto".into() }
-fn default_cli_check_interval() -> u64 { 300 }
-fn default_retrieval_threshold() -> i64 { 90 }
-fn default_distillation_interval() -> u64 { 7200 }
-fn default_cloud_provider() -> String { "openai".into() }
-fn default_cloud_model() -> String { "gpt-4o-mini".into() }
-fn default_cloud_limit() -> f64 { 5.0 }
-fn default_local_backend() -> String { "auto".into() }
-fn default_local_model() -> String { "phi-4-mini-instruct".into() }
-fn default_local_llm_provider() -> String { "ollama".into() }
-fn default_local_llm_url() -> String { "http://localhost:11434/v1".into() }
-fn default_local_llm_model() -> String { "qwen3:8b".into() }
 
-impl Default for SchedulerConfig {
+fn default_max_concurrent() -> usize { 2 }
+fn default_min_watch_interval_secs() -> u64 { 900 }
+fn default_max_runs_per_job() -> usize { 100 }
+fn default_missing_verdict() -> String { "notify".into() }
+
+impl Default for PiConfig {
     fn default() -> Self {
-        Self { enabled: true }
+        Self {
+            binary: default_pi_binary(),
+            api_key_env: default_pi_api_key_env(),
+            provider: String::new(),
+            model: String::new(),
+            thinking: default_pi_thinking(),
+            jobs_tools: Vec::new(),
+            channel_tools: Vec::new(),
+            timeout_secs: default_pi_timeout_secs(),
+            idle_compact_secs: default_idle_compact_secs(),
+            compact_token_threshold: default_compact_token_threshold(),
+            session_dir: default_pi_session_dir(),
+            extra_args: Vec::new(),
+        }
     }
 }
 
-impl Default for MemoryConfig {
+impl Default for JobsConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            vault_path: default_vault_path(),
-            mode: "auto".into(),
-            cli_check_interval_secs: 300,
-            retrieval_review_threshold_days: 90,
-            distillation_interval_secs: 7200,
-            cloud_provider: "openai".into(),
-            cloud_model: "gpt-4o-mini".into(),
-            cloud_monthly_limit: 5.0,
-            local_preprocessing: false,
-            local_backend: "auto".into(),
-            local_model: "phi-4-mini-instruct".into(),
-            full_local: false,
-            local_llm_provider: "ollama".into(),
-            local_llm_base_url: "http://localhost:11434/v1".into(),
-            local_llm_model: "qwen3:8b".into(),
+            max_concurrent: default_max_concurrent(),
+            min_watch_interval_secs: default_min_watch_interval_secs(),
+            max_runs_per_job: default_max_runs_per_job(),
+            missing_verdict: default_missing_verdict(),
         }
     }
 }
@@ -190,4 +170,34 @@ pub fn load_config(path: &Path) -> Result<AppConfig, AlfredError> {
         .map_err(|e| AlfredError::Config(format!("failed to parse config: {}", e)))?;
 
     Ok(config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn example_config_loads() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config/config.toml.example");
+        let config = load_config(&path).expect("bundled example config should parse");
+        assert_eq!(config.server.host, "127.0.0.1");
+        assert_eq!(config.server.api_key, None);
+        assert_eq!(config.pi.binary, "pi");
+        assert!(config.jobs.enabled);
+    }
+
+    #[test]
+    fn missing_pi_and_jobs_sections_use_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[server]\nport = 9\n\n[prompt]\nsystem_prompt_file = \"s.md\"\nuser_prompt_file = \"u.md\"\n",
+        )
+        .unwrap();
+        let config = load_config(&path).unwrap();
+        assert_eq!(config.pi.binary, "pi");
+        assert_eq!(config.jobs.min_watch_interval_secs, 900);
+        assert_eq!(config.jobs.missing_verdict, "notify");
+    }
 }
