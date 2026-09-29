@@ -52,10 +52,8 @@ mod telegram {
     ) -> (TelegramConnector, Arc<Recorder>, TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let store = Arc::new(Store::new(&dir.path().join("alfred.db")).unwrap());
-        let (event_tx, _) = tokio::sync::broadcast::channel(16);
         let state = AppState {
             store,
-            event_tx,
             start_time: Instant::now(),
             active_connections: Arc::new(AtomicUsize::new(0)),
             port: 0,

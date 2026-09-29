@@ -56,10 +56,8 @@ mod rest_api {
             isolated_home();
             let db = tempfile::tempdir().expect("temp db dir");
             let store = Arc::new(Store::new(&db.path().join("rest.db")).expect("store"));
-            let (event_tx, _) = tokio::sync::broadcast::channel(16);
             let state = AppState {
                 store: store.clone(),
-                event_tx,
                 start_time: Instant::now(),
                 active_connections: Arc::new(AtomicUsize::new(0)),
                 port: 0,

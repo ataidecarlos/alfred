@@ -4,7 +4,6 @@
 //! the implementation here makes it usable from integration tests
 //! (`tests/*.rs`) and future embedders.
 
-pub mod agent;
 pub mod cli;
 pub mod config;
 pub mod config_watch;
@@ -19,6 +18,4 @@ pub mod scheduler;
 pub mod server;
 pub mod skills;
 pub mod store;
-pub mod types;
 pub mod webhook;
-pub mod workspace;

@@ -286,12 +286,10 @@ async fn run_server_mode(config_path: &Option<String>) {
 
 async fn initialize_state(config: &config::AppConfig) -> Result<AppState, Box<dyn std::error::Error>> {
     let store = Arc::new(Store::new(Paths::database_file().as_path())?);
-    let (event_tx, _) = tokio::sync::broadcast::channel(256);
     let pi_version = server::probe_pi_version(&config.pi.binary);
 
     Ok(AppState {
         store,
-        event_tx,
         start_time: Instant::now(),
         active_connections: Arc::new(AtomicUsize::new(0)),
         port: config.server.port,

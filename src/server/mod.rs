@@ -9,16 +9,13 @@ use axum::extract::Request;
 use axum::middleware::{self, Next};
 use axum::response::Response;
 use tokio::net::TcpListener;
-use tokio::sync::broadcast;
 use tracing::info;
 
 use crate::config::{JobsConfig, PiConfig, ServerConfig, TelegramConfig};
-use crate::agent::event::AgentEvent;
 
 #[derive(Clone)]
 pub struct AppState {
     pub store: Arc<crate::store::Store>,
-    pub event_tx: broadcast::Sender<AgentEvent>,
     pub start_time: Instant,
     pub active_connections: Arc<AtomicUsize>,
     pub port: u16,
