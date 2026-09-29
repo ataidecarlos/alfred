@@ -11,6 +11,7 @@ pub mod connectors;
 pub mod error;
 pub mod memory;
 pub mod paths;
+pub mod pi;
 pub mod prompt;
 pub mod scheduler;
 pub mod server;
