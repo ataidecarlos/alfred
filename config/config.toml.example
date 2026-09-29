@@ -23,8 +23,8 @@ thinking = "off"
 jobs_tools = []
 channel_tools = []
 timeout_secs = 900
-idle_compact_secs = 300
-compact_token_threshold = 100000
+idle_compact_secs = 43200
+compact_token_threshold = 60000
 session_dir = "~/.alfred/pi/sessions"
 extra_args = []
 
