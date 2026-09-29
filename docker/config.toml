@@ -1,32 +1,22 @@
 # Clean, container-first Alfred configuration.
 #
-# API keys are injected through environment variables and expanded by Alfred
-# when the config is loaded (see src/config.rs::expand_env_vars). Change
-# llm.default_provider to use a different provider.
+# Alfred delegates the agent loop to Pi (https://github.com/earendil-works/pi),
+# which it runs as a subprocess. Pi reads its provider key from the environment
+# variable named by [pi].api_key_env; Alfred expands ${...} references when the
+# config is loaded (see src/config.rs::expand_env_vars). The key is passed to
+# the subprocess by environment, never by --api-key.
 
 [server]
 port = 3000
 host = "0.0.0.0"
 
-[llm]
-default_provider = "openai"
-
-[llm.providers.openai]
-api_key = "${OPENAI_API_KEY}"
-model = "gpt-4o"
-
-[llm.providers.anthropic]
-api_key = "${ANTHROPIC_API_KEY}"
-model = "claude-sonnet-4-20250514"
-
-[llm.providers.google]
-api_key = "${GOOGLE_API_KEY}"
-model = "gemini-2.0-flash"
-
-[llm.providers.deepseek]
-api_key = "${DEEPSEEK_API_KEY}"
-model = "deepseek-v4-flash"
-base_url = "https://api.deepseek.com"
+# The Pi subprocess. `binary` must be on PATH (the Docker image provides it).
+[pi]
+binary = "pi"
+api_key_env = "PI_API_KEY"
+provider = "opencode-go"
+model = "space-bunny-free"
+thinking = "off"
 
 # Empty table: prompt files use the default paths under ~/.alfred/config/prompts.
 [prompt]
