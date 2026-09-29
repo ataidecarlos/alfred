@@ -32,11 +32,12 @@ async fn connection_tracker(state: axum::extract::State<AppState>, req: Request,
     response
 }
 
-pub async fn start_server(
-    config: &ServerConfig,
-    state: AppState,
-) -> Result<(), crate::error::AlfredError> {
-    let app = Router::new()
+/// Build the REST router.
+///
+/// Exposed separately from [`start_server`] so tests (and future embedders) can
+/// drive the exact routes the server binds without opening a fixed port.
+pub fn app(state: AppState) -> Router {
+    Router::new()
         .route("/health", get(routes::health))
         .route("/api/info", get(routes::server_info))
         .route("/api/todos", get(routes::list_todos))
@@ -44,8 +45,25 @@ pub async fn start_server(
         .route("/api/todos/{id}", axum::routing::delete(routes::delete_todo))
         .route("/api/todos/{id}", axum::routing::put(routes::update_todo))
         .route("/api/todos/{id}/complete", axum::routing::post(routes::complete_todo))
+        .route("/api/jobs", get(routes::list_jobs))
+        .route("/api/jobs", axum::routing::post(routes::create_job))
+        .route("/api/jobs/{id}", get(routes::get_job))
+        .route("/api/jobs/{id}", axum::routing::put(routes::update_job))
+        .route("/api/jobs/{id}", axum::routing::delete(routes::delete_job))
+        .route("/api/jobs/{id}/run", axum::routing::post(routes::run_job))
+        .route("/api/jobs/{id}/runs", get(routes::list_job_runs))
+        .route("/api/memories", get(routes::list_memories))
+        .route("/api/memories", axum::routing::post(routes::add_memory))
+        .route("/api/memories/{slug}", axum::routing::delete(routes::delete_memory))
         .layer(middleware::from_fn_with_state(state.clone(), connection_tracker))
-        .with_state(state);
+        .with_state(state)
+}
+
+pub async fn start_server(
+    config: &ServerConfig,
+    state: AppState,
+) -> Result<(), crate::error::AlfredError> {
+    let app = app(state);
 
     let addr = format!("{}:{}", config.host, config.port);
     info!("Alfred server listening on {}", addr);
