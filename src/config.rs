@@ -211,7 +211,10 @@ mod tests {
         let config = load_config(&path).expect("bundled example config should parse");
         assert_eq!(config.server.host, "127.0.0.1");
         assert_eq!(config.server.api_key, None);
-        assert_eq!(config.pi.binary, "pi");
+        assert_eq!(config.pi.binary, "pi");        // The example is what a first run copies into place, so its compaction
+        // settings must match the documented policy: a 12-hour idle default.
+        assert_eq!(config.pi.idle_compact_secs, 43_200, "the example must not shorten the 12h idle default");
+        assert_eq!(config.pi.compact_token_threshold, 60_000);
         assert!(config.jobs.enabled);
         // An unconfigured webhook allow-list denies every host.
         assert!(config.webhook.allowed_hosts.is_empty());
@@ -257,7 +260,10 @@ mod tests {
         )
         .unwrap();
         let config = load_config(&path).unwrap();
-        assert_eq!(config.pi.binary, "pi");
+        assert_eq!(config.pi.binary, "pi");        // The example is what a first run copies into place, so its compaction
+        // settings must match the documented policy: a 12-hour idle default.
+        assert_eq!(config.pi.idle_compact_secs, 43_200, "the example must not shorten the 12h idle default");
+        assert_eq!(config.pi.compact_token_threshold, 60_000);
         assert_eq!(config.jobs.min_watch_interval_secs, 900);
         assert_eq!(config.jobs.missing_verdict, "notify");
     }
