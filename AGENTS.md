@@ -54,8 +54,9 @@ cargo run -- job list    # run the server is `cargo run` with no arguments
 ```
 
 Pi is a **runtime dependency**, not a build dependency. Tests that need it use
-the fixture at `tests/fixtures/fake-pi.sh` via `[pi] binary` — no API key and no
-network. Prefer the fixture over live calls.
+the compiled double at `src/bin/fake-pi.rs` (a `[[bin]]` target, located by
+tests through `CARGO_BIN_EXE_fake-pi`) via `[pi] binary` — no API key and no
+network. Prefer the double over live calls.
 
 ## Git discipline
 
