@@ -38,6 +38,15 @@ pub enum AlfredError {
     #[error("tool '{name}' failed: {message}")]
     Tool { name: String, message: String },
 
+    #[error("host not allowed: {0}")]
+    HostNotAllowed(String),
+
+    #[error("todo not found: {0}")]
+    TodoNotFound(String),
+
+    #[error("{0}")]
+    Usage(String),
+
     #[error("connector error: {0}")]
     Connector(String),
 

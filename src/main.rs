@@ -1,4 +1,4 @@
-use alfred::{cli, config, config_watch, connectors, paths, server, store};
+use alfred::{cli, config, config_watch, connectors, paths, server, skills, store};
 
 use std::path::Path;
 use std::sync::Arc;
@@ -111,12 +111,15 @@ async fn main() {
 
     ensure_directories();
     auto_generate_config_files();
+    // Regenerate the Pi skills that document the agent's CLI capabilities. A
+    // failure is logged by `skills` and never blocks startup.
+    skills::generate_skills();
 
     let Cli { config, command } = Cli::parse();
 
     if let Some(command) = command {
         let config_path = resolve_config_path(config.as_deref());
-        if let Err(error) = cli::run(command, &config_path) {
+        if let Err(error) = cli::run(command, &config_path).await {
             eprintln!("ERROR: {error}");
             std::process::exit(1);
         }

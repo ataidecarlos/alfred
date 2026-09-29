@@ -17,6 +17,8 @@ pub mod pi;
 pub mod prompt;
 pub mod scheduler;
 pub mod server;
+pub mod skills;
 pub mod store;
 pub mod types;
+pub mod webhook;
 pub mod workspace;

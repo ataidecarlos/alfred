@@ -178,6 +178,26 @@ impl Store {
         Ok(todos)
     }
 
+    /// Look up a todo by id, whether or not it is complete.
+    pub fn get_todo(&self, id: &str) -> Result<Option<Todo>, AlfredError> {
+        let conn = self.conn.lock().map_err(|e| AlfredError::Store(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+        let mut stmt = conn.prepare("SELECT id, title, description, priority, completed, due_date FROM todos WHERE id = ?1")?;
+        let mut rows = stmt.query_map(params![id], |row| {
+            Ok(Todo {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                description: row.get(2)?,
+                priority: row.get(3)?,
+                completed: row.get::<_, i32>(4)? != 0,
+                due_date: row.get(5)?,
+            })
+        })?;
+        match rows.next() {
+            Some(todo) => Ok(Some(todo?)),
+            None => Ok(None),
+        }
+    }
+
     /// Mark a todo complete. Returns true if a row was changed, false if the id is unknown.
     pub fn complete_todo(&self, id: &str) -> Result<bool, AlfredError> {
         let now = Utc::now().timestamp();
@@ -480,5 +500,29 @@ mod tests {
             ).unwrap();
             assert_eq!(count, 1, "index {index} should exist");
         }
+    }
+
+    #[test]
+    fn todo_round_trip_and_get_by_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(&dir.path().join("todos.db")).unwrap();
+
+        let id = store
+            .add_todo("Water plants", "back porch", "low", "")
+            .unwrap();
+        assert_eq!(store.get_todo(&id).unwrap().unwrap().title, "Water plants");
+        assert!(store.get_todo("missing").unwrap().is_none());
+
+        let listed = store.list_todos().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].priority, "low");
+
+        assert!(store.complete_todo(&id).unwrap());
+        assert!(store.get_todo(&id).unwrap().unwrap().completed);
+        assert!(store.list_todos().unwrap().is_empty(), "completed todos are hidden");
+        assert!(!store.complete_todo("missing").unwrap());
+
+        store.delete_todo(&id).unwrap();
+        assert!(store.get_todo(&id).unwrap().is_none());
     }
 }
