@@ -8,6 +8,9 @@
     { "action": "read", "resource": "*", "effect": "allow" },
     { "action": "write", "resource": "*", "effect": "allow" },
     { "action": "subagent", "resource": "*", "effect": "allow" },
+    { "action": "external_directory", "resource": "C:\\Users\\ataid\\projects\\alfred*", "effect": "allow" },
+    { "action": "external_directory", "resource": "C:/Users/ataid/projects/alfred*", "effect": "allow" },
+    { "action": "external_directory", "resource": "~/projects/alfred*", "effect": "allow" }
   ],
   "agents": {
     "build": {
