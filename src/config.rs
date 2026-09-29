@@ -195,6 +195,16 @@ pub fn load_config(path: &Path) -> Result<AppConfig, AlfredError> {
 mod tests {
     use super::*;
 
+    /// The user requirement is a 12-hour idle default and a 60k token threshold.
+    /// #4 left these unspecified and a worker chose 300 / 100_000, which would have
+    /// compacted every conversation after five minutes of quiet.
+    #[test]
+    fn compaction_defaults_match_the_specified_policy() {
+        let pi = PiConfig::default();
+        assert_eq!(pi.idle_compact_secs, 43_200, "idle default must be 12 hours");
+        assert_eq!(pi.compact_token_threshold, 60_000);
+    }
+
     #[test]
     fn example_config_loads() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config/config.toml.example");
