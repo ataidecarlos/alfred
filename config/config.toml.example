@@ -34,3 +34,8 @@ max_concurrent = 2
 min_watch_interval_secs = 900
 max_runs_per_job = 100
 missing_verdict = "notify"
+
+[webhook]
+# Hosts the agent may POST to with `alfred webhook send`.
+# Empty denies every host (the default; the agent runs unattended).
+allowed_hosts = []

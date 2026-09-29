@@ -101,6 +101,27 @@ The 5-field cron syntax and `@hourly`/`@daily`/`@weekly`/`@monthly`/`@reboot`
 keywords are supported. On Windows, only `*/N * * * *`, `M H * * *`, and the
 keywords above map onto Task Scheduler.
 
+## Agent Capabilities
+
+The agent runs Pi; Alfred ships each capability as a CLI command plus a Pi
+skill under `~/.alfred/config/skills/<name>/SKILL.md`, regenerated at startup.
+They are safe to run by hand for testing:
+
+```bash
+# Todos (stored in Alfred's SQLite database)
+alfred todo add --title "Water the plants" --priority low
+alfred todo list
+alfred todo complete <id>
+alfred todo remove <id>
+
+# Append one durable fact to ~/.alfred/config/memories.md
+alfred remember "The garage code is 1234"
+
+# POST a JSON body. Only hosts in [webhook] allowed_hosts are permitted;
+# an empty list (the default) denies every host.
+alfred webhook send https://example.com/hook --json '{"event":"ping"}'
+```
+
 ## API Endpoints
 
 | Method | Endpoint | Description |

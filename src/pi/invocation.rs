@@ -42,7 +42,8 @@ pub struct PiInvocation {
     pub system_prompt: String,
     /// Tool allowlist, joined with commas for `--tools`.
     pub tools: Vec<String>,
-    /// Directory passed via `--skill`; defaults to `~/.alfred/skills`.
+    /// Directory passed via `--skill`; defaults to
+    /// `~/.alfred/config/skills`.
     pub skills_dir: PathBuf,
     /// `PI_CODING_AGENT_DIR`; defaults to `~/.alfred/pi-agent`.
     pub agent_dir: PathBuf,

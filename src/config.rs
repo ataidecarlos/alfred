@@ -15,6 +15,8 @@ pub struct AppConfig {
     pub pi: PiConfig,
     #[serde(default)]
     pub jobs: JobsConfig,
+    #[serde(default)]
+    pub webhook: WebhookConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -89,6 +91,15 @@ pub struct JobsConfig {
     pub missing_verdict: String,
 }
 
+/// Policy for the agent's outbound `alfred webhook send` capability.
+#[derive(Debug, Deserialize)]
+pub struct WebhookConfig {
+    /// Hosts the agent may POST to. An empty list denies every host — the
+    /// default, because the agent runs unattended on a 24x7 host.
+    #[serde(default)]
+    pub allowed_hosts: Vec<String>,
+}
+
 fn default_port() -> u16 { 8080 }
 fn default_host() -> String { "127.0.0.1".into() }
 fn default_db_path() -> String {
@@ -148,6 +159,14 @@ impl Default for JobsConfig {
     }
 }
 
+impl Default for WebhookConfig {
+    fn default() -> Self {
+        Self {
+            allowed_hosts: Vec::new(),
+        }
+    }
+}
+
 fn expand_env_vars(s: &str) -> String {
     let mut result = s.to_string();
     while let Some(start) = result.find("${") {
@@ -184,6 +203,38 @@ mod tests {
         assert_eq!(config.server.api_key, None);
         assert_eq!(config.pi.binary, "pi");
         assert!(config.jobs.enabled);
+        // An unconfigured webhook allow-list denies every host.
+        assert!(config.webhook.allowed_hosts.is_empty());
+    }
+
+    #[test]
+    fn webhook_allowed_hosts_are_parsed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[server]\nport = 9\n\n[prompt]\nsystem_prompt_file = \"s.md\"\nuser_prompt_file = \"u.md\"\n\n\
+             [webhook]\nallowed_hosts = [\"example.com\", \"hooks.example.org\"]\n",
+        )
+        .unwrap();
+        let config = load_config(&path).unwrap();
+        assert_eq!(
+            config.webhook.allowed_hosts,
+            vec!["example.com".to_string(), "hooks.example.org".to_string()]
+        );
+    }
+
+    #[test]
+    fn missing_webhook_section_defaults_to_deny_all() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[server]\nport = 9\n\n[prompt]\nsystem_prompt_file = \"s.md\"\nuser_prompt_file = \"u.md\"\n",
+        )
+        .unwrap();
+        let config = load_config(&path).unwrap();
+        assert!(config.webhook.allowed_hosts.is_empty());
     }
 
     #[test]

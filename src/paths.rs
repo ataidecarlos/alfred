@@ -86,9 +86,12 @@ impl Paths {
         Self::config_dir().join("memories.md")
     }
 
-    /// Pi skills shipped with Alfred: ~/.alfred/skills
+    /// Pi skills shipped with Alfred: ~/.alfred/config/skills
+    ///
+    /// This is the directory passed to Pi as `--skill`, and where
+    /// [`crate::skills`] writes the generated `SKILL.md` files.
     pub fn skills_dir() -> PathBuf {
-        Self::home_dir().join("skills")
+        Self::config_dir().join("skills")
     }
 
     /// Alfred's private Pi home: ~/.alfred/pi
