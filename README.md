@@ -124,6 +124,26 @@ allowed_hosts = []
 loaded. The config is hot-reloaded: a change is re-read and validated while the
 server runs, and a malformed change is rejected with the previous config kept.
 
+### Isolating a run
+
+The database path resolves in this order, highest first:
+
+1. `ALFRED_DATA_DIR` — when set, the database becomes `$ALFRED_DATA_DIR/alfred.db`.
+2. `[server] db_path` — an explicit path in the config file.
+3. `~/.alfred/data/alfred.db` — the default (`%USERPROFILE%\.alfred\data\alfred.db` on Windows).
+
+A throwaway run therefore needs one variable rather than a `USERPROFILE` override:
+
+```bash
+ALFRED_DATA_DIR=/tmp/alfred-test alfred job list
+```
+
+```powershell
+$env:ALFRED_DATA_DIR = "$env:TEMP\alfred-test"; alfred job list
+```
+
+The override also redirects the workspace and per-job scratch directories, so an isolated run never touches the real database. `config/` and `logs/` remain home-relative.
+
 ## Running the server
 
 `alfred` with no arguments starts the server: the REST API, the scheduler (when

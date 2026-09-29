@@ -1,5 +1,13 @@
 use std::path::PathBuf;
 
+/// Environment variable that overrides [`Paths::data_dir`].
+///
+/// Point it at a throwaway directory to run Alfred against an isolated SQLite
+/// database (plus the workspace and per-job scratch directories) without
+/// touching the user's `~/.alfred` — and without overriding `USERPROFILE` /
+/// `HOME`, which rustup and `cargo` also read.
+pub const DATA_DIR_ENV: &str = "ALFRED_DATA_DIR";
+
 pub struct Paths;
 
 impl Paths {
@@ -26,9 +34,22 @@ impl Paths {
         Self::home_dir().join("config")
     }
 
-    /// Data directory: ~/.alfred/data
+    /// The data directory named by [`DATA_DIR_ENV`], when it is set to a
+    /// non-empty value.
+    ///
+    /// This is the override consulted by [`Paths::data_dir`] and, through it,
+    /// by [`Paths::database_file`], [`Paths::workspace_dir`] and
+    /// [`Paths::job_workspace_dir`].
+    pub fn data_dir_override() -> Option<PathBuf> {
+        std::env::var(DATA_DIR_ENV)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .map(PathBuf::from)
+    }
+
+    /// Data directory: `$ALFRED_DATA_DIR` when set, else `~/.alfred/data`.
     pub fn data_dir() -> PathBuf {
-        Self::home_dir().join("data")
+        Self::data_dir_override().unwrap_or_else(|| Self::home_dir().join("data"))
     }
 
     /// Logs directory: ~/.alfred/logs
@@ -112,3 +133,50 @@ impl Paths {
         Self::data_dir().join("jobs").join(id)
     }
 }
+
+#[cfg(test)]
+pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Set `ALFRED_DATA_DIR` for the duration of `body`, then restore it.
+    fn with_data_dir_override<T>(value: Option<&str>, body: impl FnOnce() -> T) -> T {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let previous = std::env::var(DATA_DIR_ENV).ok();
+        match value {
+            Some(value) => std::env::set_var(DATA_DIR_ENV, value),
+            None => std::env::remove_var(DATA_DIR_ENV),
+        }
+        let result = body();
+        match previous {
+            Some(previous) => std::env::set_var(DATA_DIR_ENV, previous),
+            None => std::env::remove_var(DATA_DIR_ENV),
+        }
+        result
+    }
+
+    #[test]
+    fn data_dir_override_redirects_data_and_database() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let expected = dir.path().to_path_buf();
+
+        let (data_dir, database) = with_data_dir_override(Some(dir.path().to_str().unwrap()), || {
+            (Paths::data_dir(), Paths::database_file())
+        });
+
+        assert_eq!(data_dir, expected);
+        assert_eq!(database, expected.join("alfred.db"));
+    }
+
+    #[test]
+    fn unset_or_blank_override_falls_back_to_the_home_directory() {
+        let unset = with_data_dir_override(None, || Paths::data_dir());
+        assert_eq!(unset, Paths::home_dir().join("data"));
+
+        let blank = with_data_dir_override(Some("   "), || Paths::data_dir());
+        assert_eq!(blank, Paths::home_dir().join("data"));
+    }
+}
+

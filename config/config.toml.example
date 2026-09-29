@@ -2,6 +2,10 @@
 port = 8080
 host = "127.0.0.1"
 # api_key = "${ALFRED_API_KEY}"
+# SQLite database path. Omit to use the default (<home>/.alfred/data/alfred.db).
+# ALFRED_DATA_DIR overrides this value. Precedence:
+# ALFRED_DATA_DIR > db_path > <home>/.alfred/data/alfred.db
+# db_path = "C:/path/to/alfred.db"
 
 # [telegram]
 # bot_token = "${TELEGRAM_BOT_TOKEN}"

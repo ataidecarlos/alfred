@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
@@ -25,8 +25,11 @@ pub struct ServerConfig {
     pub port: u16,
     #[serde(default = "default_host")]
     pub host: String,
-    #[serde(default = "default_db_path")]
-    pub db_path: String,
+    /// Explicit SQLite database path. When omitted, the database path resolves
+    /// from [`Paths::database_file`] (and therefore `ALFRED_DATA_DIR`). See
+    /// [`resolve_database_path`] for the precedence.
+    #[serde(default)]
+    pub db_path: Option<String>,
     /// Bearer token required by the REST surface when set.
     #[serde(default)]
     pub api_key: Option<String>,
@@ -102,9 +105,6 @@ pub struct WebhookConfig {
 
 fn default_port() -> u16 { 8080 }
 fn default_host() -> String { "127.0.0.1".into() }
-fn default_db_path() -> String {
-    Paths::database_file().to_string_lossy().to_string()
-}
 fn default_system_prompt_path() -> String {
     Paths::system_prompt_file().to_string_lossy().to_string()
 }
@@ -191,6 +191,41 @@ pub fn load_config(path: &Path) -> Result<AppConfig, AlfredError> {
     Ok(config)
 }
 
+/// Resolve the SQLite database path for `config`.
+///
+/// Precedence, highest first:
+///
+/// 1. `override_dir` — the caller passes [`Paths::data_dir_override`], i.e. the
+///    `ALFRED_DATA_DIR` environment override. The database is
+///    `<override_dir>/alfred.db`. The override wins so that a run is isolatable
+///    regardless of what the config file says.
+/// 2. An explicit, non-empty `[server] db_path` from the config file.
+/// 3. The default, home-relative `~/.alfred/data/alfred.db`
+///    ([`Paths::database_file`]).
+///
+/// Takes the override as an argument rather than reading the environment itself
+/// so the precedence is testable without mutating global process state.
+pub fn resolve_database_path(config: &AppConfig, override_dir: Option<&Path>) -> PathBuf {
+    if let Some(dir) = override_dir {
+        return dir.join("alfred.db");
+    }
+    if let Some(path) = config.server.db_path.as_deref() {
+        let path = path.trim();
+        if !path.is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+    Paths::database_file()
+}
+
+impl AppConfig {
+    /// The database path this configuration resolves to, honouring the
+    /// `ALFRED_DATA_DIR` environment override. See [`resolve_database_path`].
+    pub fn database_path(&self) -> PathBuf {
+        resolve_database_path(self, Paths::data_dir_override().as_deref())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -266,5 +301,68 @@ mod tests {
         assert_eq!(config.pi.compact_token_threshold, 60_000);
         assert_eq!(config.jobs.min_watch_interval_secs, 900);
         assert_eq!(config.jobs.missing_verdict, "notify");
+    }
+
+    // ------------------------------------------------- database path precedence
+
+    /// A minimal config body, optionally carrying `[server] db_path`.
+    fn config_body(db_path: Option<&str>) -> String {
+        let db_line = match db_path {
+            Some(path) => format!("db_path = \"{}\"\n", path.replace('\\', "\\\\")),
+            None => String::new(),
+        };
+        format!(
+            "[server]\nport = 9\n{db_line}\n[prompt]\nsystem_prompt_file = \"s.md\"\nuser_prompt_file = \"u.md\"\n"
+        )
+    }
+
+    fn load_body(dir: &Path, body: &str) -> AppConfig {
+        let path = dir.join("config.toml");
+        std::fs::write(&path, body).unwrap();
+        load_config(&path).unwrap()
+    }
+
+    #[test]
+    fn explicit_db_path_is_used_when_the_override_is_unset() {
+        let dir = tempfile::tempdir().unwrap();
+        let custom = dir.path().join("custom.db");
+        let config = load_body(dir.path(), &config_body(Some(custom.to_str().unwrap())));
+
+        assert_eq!(config.server.db_path.as_deref(), custom.to_str());
+        assert_eq!(resolve_database_path(&config, None), custom);
+    }
+
+    #[test]
+    fn data_dir_override_beats_an_explicit_db_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = load_body(dir.path(), &config_body(Some("/elsewhere/other.db")));
+        let override_dir = dir.path().join("override");
+
+        assert_eq!(
+            resolve_database_path(&config, Some(&override_dir)),
+            override_dir.join("alfred.db"),
+            "ALFRED_DATA_DIR must win so a run can always be isolated"
+        );
+    }
+
+    #[test]
+    fn omitted_db_path_defaults_to_the_home_database() {
+        // `Paths::database_file` reads ALFRED_DATA_DIR; hold the shared lock and
+        // clear it so this test pins the true fallback deterministically.
+        let _guard = crate::paths::ENV_LOCK.lock().expect("env lock");
+        let previous = std::env::var(crate::paths::DATA_DIR_ENV).ok();
+        std::env::remove_var(crate::paths::DATA_DIR_ENV);
+
+        let dir = tempfile::tempdir().unwrap();
+        let config = load_body(dir.path(), &config_body(None));
+        let resolved = resolve_database_path(&config, None);
+
+        match previous {
+            Some(previous) => std::env::set_var(crate::paths::DATA_DIR_ENV, previous),
+            None => std::env::remove_var(crate::paths::DATA_DIR_ENV),
+        }
+
+        assert_eq!(config.server.db_path, None);
+        assert_eq!(resolved, Paths::database_file());
     }
 }
