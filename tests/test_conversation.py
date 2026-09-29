@@ -3,7 +3,7 @@ Conversation tests.
 
 Tests multi-turn context and basic conversational ability.
 Does NOT test tool usage (OpenCode Go models don't support native tool calling).
-Tool tests are in test_todo.py and test_memory.py via REST API.
+Tool tests are in test_todo.py via REST API.
 """
 
 import time

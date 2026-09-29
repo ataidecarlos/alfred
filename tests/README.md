@@ -1,6 +1,9 @@
 # Alfred Integration Test Suite
 
-End-to-end tests that interact with Alfred via HTTP, covering server lifecycle, memory vault operations, database interactions, and multi-turn conversations.
+End-to-end tests that interact with Alfred via HTTP, covering server lifecycle, database interactions, and multi-turn conversations.
+
+`cargo test` is the primary gate for this repository. The Python suite
+described here is a secondary, live-API end-to-end check; it is not the gate.
 
 ## Prerequisites
 
@@ -15,9 +18,19 @@ End-to-end tests that interact with Alfred via HTTP, covering server lifecycle, 
    pip install -r requirements.txt
    ```
 
-3. **Set up API key** (required for LLM-powered tests):
+3. **Set up an API key** (only for LLM-backed tests):
    - Copy `test_api_keys.toml.example` to `test_api_keys.toml`
    - Add your OpenCode Go API key
+
+## Test Gate
+
+`cargo test` is the primary gate and must be green before any change is
+accepted. It runs the Rust unit and integration tests, including the Pi RPC
+boundary against the deterministic fixture at `tests/fixtures/fake-pi.sh` —
+no API key and no network required.
+
+The Python suite below requires a live API key and is **not** the primary
+gate; it is opt-in only and is not what closes an issue.
 
 ## Running Tests
 
@@ -29,9 +42,6 @@ pytest -v
 
 # Run only server lifecycle tests (highest priority)
 pytest test_server.py -v
-
-# Run memory tests
-pytest test_memory.py -v
 
 # Run todo tests
 pytest test_todo.py -v
@@ -61,24 +71,29 @@ Environment variables:
 | File | Priority | Description |
 |------|----------|-------------|
 | `test_server.py` | **Highest** | Server start, health check, info, stop |
-| `test_memory.py` | Medium | Store, recall, update, archive memories in vault |
 | `test_todo.py` | Medium | Create, list, complete, delete todos in database |
 | `test_conversation.py` | Medium | Multi-turn context, tool usage, persistence |
 
 ## Rust Integration Tests
 
-In addition to the Python end-to-end suite, the repository ships Rust
-integration tests under `tests/`. Run them from the project root:
+The primary tests are Rust. Run them from the project root:
 
 ```bash
-cargo test --test laya_integration
-cargo test --test tui_control_center
+cargo test
 ```
+
+The Pi RPC boundary lives in `tests/pi_rpc.rs`. It exercises framing,
+invocation construction, spawn/exit handling, and a full prompt round trip
+against the deterministic fixture at `tests/fixtures/fake-pi.sh`.
 
 | File | Verification for | Description |
 |------|------------------|-------------|
-| `laya_integration.rs` | Laya decision layer | High-confidence requests execute without an LLM call; all others delegate to the configured provider |
-| `tui_control_center.rs` | TUI control center | Control-center state machine and the real rendering path (`render_to_text`) |
+| `tests/pi_rpc.rs` | Pi RPC boundary | JSONL framing, Pi invocation args/env, process lifecycle, and a fake-pi round trip |
+| `tests/fixtures/fake-pi.sh` | Deterministic Pi stand-in | Speaks the RPC protocol on stdin/stdout with no network, key, or model |
+
+Fixture-based tests skip with a clear reason on non-Unix hosts: the fake-pi
+round trip is marked `ignore` on non-Unix with the reason `fake-pi.sh is a Unix
+fixture`, so `cargo test` stays green on Windows.
 
 For a full end-to-end smoke test against a pristine container, build and run
 the Docker test image:
@@ -90,15 +105,14 @@ the Docker test image:
 ## How It Works
 
 1. **Server Lifecycle** (`conftest.py`):
-   - Creates isolated test directory with config, vault, and database
+   - Creates isolated test directory with config, prompts, and database
    - Starts Alfred server as subprocess
    - Polls `/health` until ready (max 15s)
    - Tears down server after all tests complete
 
 2. **Clean State** (`conftest.py`):
    - `autouse=True` fixture runs before every test
-   - Clears all database tables (todos, memories, conversations)
-   - Removes all `.md` files from vault categories (keeps templates and `_index.md`)
+   - Clears the database tables the suite writes (todos, conversations)
 
 3. **Test Isolation**:
    - Each test creates its own data with unique identifiers
@@ -131,7 +145,3 @@ def test_my_feature(self, server, client, helpers):
 **Tests timeout:**
 - LLM API calls can be slow; increase timeout in `send_message()`
 - Check API key is valid in `test_api_keys.toml`
-
-**Vault files not found:**
-- Check `ALFRED_VAULT` environment variable
-- Look at the vault path in test output
