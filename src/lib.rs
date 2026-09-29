@@ -9,6 +9,7 @@ pub mod config;
 pub mod config_watch;
 pub mod connectors;
 pub mod error;
+pub mod jobs;
 pub mod memory;
 pub mod paths;
 pub mod pi;

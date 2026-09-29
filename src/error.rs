@@ -20,6 +20,18 @@ pub enum AlfredError {
     #[error("store error: {0}")]
     Store(#[from] rusqlite::Error),
 
+    #[error("job name already exists")]
+    JobNameExists,
+
+    #[error("job not found: {0}")]
+    JobNotFound(String),
+
+    #[error("minimum watch interval is {0}s")]
+    WatchIntervalTooShort(u64),
+
+    #[error("{0}")]
+    JobValidation(String),
+
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
 
