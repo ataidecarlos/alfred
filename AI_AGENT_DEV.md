@@ -117,6 +117,12 @@ A line that fails to parse is logged at warn and skipped, never fatal.
 "Works as expected" is not acceptance; `cargo test job_runner` with named cases is. Write it as
 one pasteable line and prefer a single test target over a manual procedure.
 
+**Run it once before dispatch.** An acceptance command that has never executed is a guess, not a
+criterion. Authoring one is easy to get wrong: `cargo test memory prompt` reads as reasonable and
+fails, because cargo accepts a single `TESTNAME` positional and multiple libtest filters must
+follow `--`. Validate every new acceptance at authoring time, and fix the issue text rather than
+letting a worker improvise a passing substitute.
+
 ## 6. The dependency graph
 
 - `Blocked by:` text is the source of truth. GitHub's native dependency fields are optional;
@@ -205,8 +211,10 @@ Step 0 records this as evidence: the PAT was removed from `.git/config`, rotated
 | **Context exhaustion** | The ledger. Resume from `gh issue list` plus `Blocked by:`; never rely on in-context memory. |
 | **False "done"** | The overseer re-runs the acceptance independently. No command and raw output, no closure. |
 | **Branch collision** — several agents cannot hold different branches in one working tree. | Give each agent its own `git worktree` (`git worktree add ../proj-4 issue/4-slug`), or serialise the agents. Alfred's tree has two worktrees for exactly this. |
+| **A worker runs in the wrong tree.** A subagent inherits the *dispatcher's* working directory, not the worktree you intended. | Put the absolute worktree path in the brief, require the worker to confirm its cwd before its first `git` command, and forbid touching the other trees. Without this, a worker told "work on branch X" stages and commits into someone else's checkout. |
 | **Permission allowlist denies an operation.** | Test the whole operation set in Step 0. A default-deny block omitted the `subagent` action here and blocked an entire dispatch. Default-deny means unlisted is denied, not warned. |
 | **Fuzzy acceptance criteria** | Do not dispatch. Rewrite until the acceptance is one runnable command with named cases. |
+| **The acceptance command is invalid.** | Execute every new issue's acceptance once during authoring. `cargo test memory prompt` fails — cargo takes one `TESTNAME`; multiple filters need `--`. A worker that "improves" the command instead of reporting it hides an authoring bug. |
 | **Merge conflicts on shared files** | The file-ownership cap: concurrent issues must have disjoint `## Files`. |
 | **Scope creep inside a worker** | `## Constraints` plus `AGENTS.md` ("keep the diff scoped; do not refactor neighbours"). A forced deviation is flagged and reviewed, not hidden. |
 | **Stale inline cross-references** | Keep the authoritative pointer on `Blocked by:`; treat prose `(#n)` as hints. |
