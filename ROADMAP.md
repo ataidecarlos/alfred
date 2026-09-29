@@ -1,99 +1,97 @@
 # Alfred Roadmap
 
-## Upcoming Features
+This is the single roadmap for Alfred, a 24x7 personal-assistant host whose
+agent engine is Pi. Work that is not shipped is deferred here, each item with
+the reason it is deferred.
 
-### v2026.Q4
+## Deferred
 
-#### Built-in Update Command
-- Add `alfred update` command to check for and install updates
-- Auto-check for updates on server startup
-- Option to disable auto-check in config
+### Laya decision model
 
-#### Config Migration
-- Automatic migration of config files when upgrading
-- Backup old configs before replacing
-- Merge new config options with existing settings
+Deferred: evaluation shows the base model is a fine-tuning target, not a
+drop-in gate.
 
-#### Enhanced Telegram Features
-- Support for inline queries
-- File/image handling
-- Group chat support with permissions
+- Base checkpoints score near chance zero-shot — **0.362** accuracy against a
+  **0.461** majority-class baseline — so an unfinetuned Laya cannot filter or
+  gate requests.
+- `action.act_probability` carries no signal (issue #185); a gate must use
+  `confidence`.
+- Temperature must be refit on our own data: mean ECE improves from **0.466** to
+  **0.081** after refitting.
+- Options share a single **192-token** budget, so option sets must stay small.
+- **512-token** context window.
 
-#### WebUI Dashboard
-- Simple web interface for managing todos and memories
-- Real-time server status monitoring
-- Configuration editor
+Candidate homes if it is adopted: mid-run filtering of high-volume data through
+a Pi skill, and the appliance-signal pipeline.
+Licence: Apache-2.0.
 
-### v2027.Q1
+### Per-job run-logging policy
 
-#### Multi-User Support
-- User authentication and authorization
-- Per-user conversation history
-- Role-based access control
+Deferred. v1 logs every run of every job. Not every job needs every run
+persisted; a per-job policy (log every run / log only on signal / do not log)
+would cut log and database noise.
 
-#### Plugin System
-- Custom tool development
-- Plugin marketplace
-- Hot-reload support
+### Job-run retention policy
 
-#### Advanced Scheduling
-- Recurring tasks with complex patterns
-- Task dependencies
-- Calendar integration
+Deferred. Run history is bounded only by `[jobs].max_runs_per_job` (default
+100). There is no age-based or store-wide retention policy.
 
-### v2027.Q2
+### Re-evaluate `pi-chat` after release
 
-#### Voice Interface
-- Speech-to-text integration
-- Text-to-speech responses
-- Wake word detection
+Deferred until the new product is released. `pi-chat`
+(`earendil-works/pi-chat`, MIT; vendors portions of the Vercel Chat SDK) is not a
+dependency of the current build.
 
-#### Mobile App
-- iOS/Android companion app
-- Push notifications
-- Remote management
+### Revisit Kira
 
-#### Enterprise Features
-- LDAP/SSO integration
-- Audit logging
-- Compliance reporting
+Deferred. Kira (a shared ticketing system for AI agents) was removed on purpose:
+it is developer-ticketing machinery, not an assistant capability, and
+orchestration must not enter the product. Revisit only if a non-coding use for a
+shared ticket store emerges.
 
-## Completed
+### Branch protection on `main`
 
-### v2026.09.04
-- Initial release
-- Multi-provider LLM support (OpenAI, Anthropic, Google, DeepSeek)
-- Built-in tools (webhook, shell, todo)
-- Telegram connector
-- Terminal UI (TUI)
-- Scheduled tasks
-- Cross-platform support (Linux, macOS, Windows)
-- Automated release pipeline
+Deferred. Enabling branch protection requires a token carrying
+`Administration: Read and write`, which the current token lacks (HTTP 403).
+Meanwhile it is enforced by the `AGENTS.md` rule "never push to `main`" and by
+the dispatcher being the only merge point.
 
-### Architecture Refactor (v2026.09.17)
-- Message Bus for channel decoupling
-- Session management with legacy migration
-- Agent loop/runner split
-- Workspace management
-- Unified directory structure (`~/.alfred/`)
-- Obsidian-friendly vault structure
+### Installer end-to-end verification
 
-### Platform & Developer Tooling (v2026.09.25)
-- Kira ticketing: shared ticketing system for AI agents, with autonomous
-  development support via cron jobs
-- Scheduler CLI: OS-agnostic management of cron jobs (Linux/macOS) and Windows
-  Task Scheduler entries via `alfred scheduler`
-- TUI control center: `Ctrl+K` panel for managing scheduler jobs, todos,
-  memories, and connected channels
-- Config hot-reload: config file edits are applied without restarting the server
-- Laya decision layer: high-confidence requests execute directly without an LLM
-  call, and the chosen decision path is logged
-- Docker test image: pristine-container smoke test via `docker/test.sh`
+Deferred, partially verified. The installer was executed in WSL and passes; the
+no-op second run is proven. The remaining gap is a proven successful *first*
+install, which is blocked by the linux-arm64 item below.
 
-## Contributing
+### linux-arm64
 
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Deferred (issue #53). `scripts/install.sh` advertises `linux-arm64`, but the
+release workflow's build matrix has no `aarch64-unknown-linux-gnu` target, so a
+`linux-arm64` archive is never built or published.
 
-## Feedback
+### Manual job runs
 
-Have ideas for new features? Open an issue on [GitHub](https://github.com/ataidecarlos/alfred/issues).
+Deferred. `alfred job run <id>` and `POST /api/jobs/{id}/run` still report that
+the manual-run path is unavailable, even though the Pi-backed runner and the
+scheduler shipped. A manual-run entry point should dispatch the same runner.
+
+## Removed (non-goals)
+
+Removed in the rewrite to the Pi-host; do not reintroduce these (see
+`AGENTS.md`):
+
+- The in-process LLM provider layer, agent loop, and tool-calling registry
+  (`src/llm/`, `src/agent/runner.rs`, `src/session/`, `src/tools/`) — Pi owns
+  them.
+- The terminal UI (`src/tui/`) — clients are Telegram and REST.
+- OS-level cron / Windows Task Scheduler management (`src/scheduler/control.rs`)
+  — Alfred schedules its own jobs in SQLite.
+- Kira and the autonomous ticket-driven development loop.
+- The SQLite memory index and "Laya-aware retrieval" — memory is a flat,
+  hand-editable file.
+
+## Shipped
+
+- The Pi-host rewrite: the job model (`once` / `recurring` / `watch`), the
+  SQLite scheduler, the Pi-backed runner with verdict handling, delivery to
+  Telegram, the REST surface, file-backed memories, generated Pi skills, and
+  config hot-reload.
