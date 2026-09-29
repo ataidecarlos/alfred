@@ -1,20 +1,26 @@
-use alfred::{cli, config, config_watch, connectors, paths, server, skills, store};
+use alfred::{cli, config, config_watch, connectors, jobs, paths, pi, scheduler, server, skills, store};
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::time::Instant;
 
 use clap::Parser;
+use tokio::sync::Mutex;
 use tracing::{info, error};
 use tracing_subscriber::EnvFilter;
 
 use cli::Cli;
 use config::load_config;
 use connectors::Connector;
-use connectors::telegram::TelegramConnector;
+use connectors::telegram::{shutdown_sessions, Session, TelegramConnector};
+use jobs::delivery::Delivery;
+use jobs::dispatch::JobDispatch;
+use jobs::runner::{JobRunner, MissingVerdict};
 use paths::Paths;
-use server::{AppState, start_server};
+use scheduler::{Scheduler, SchedulerConfig, SystemClock};
+use server::{start_server, AppState};
 use store::Store;
 
 const DEFAULT_CONFIG_PATH: &str = "config/config.toml";
@@ -155,9 +161,18 @@ async fn run_server_mode(config_path: &Option<String>) {
         Ok(c) => c,
         Err(e) => {
             error!("Failed to load config: {}", e);
+            eprintln!("ERROR: Failed to load config: {}", e);
             std::process::exit(1);
         }
     };
+
+    // Fail fast: a Pi binary that cannot be launched must stop startup naming
+    // the path, rather than surfacing on the first job after the server is up.
+    if let Err(error) = pi::invocation::resolve_pi_binary(&config.pi.binary) {
+        error!("{error}");
+        eprintln!("ERROR: {error}");
+        std::process::exit(1);
+    }
 
     let state = match initialize_state(&config).await {
         Ok(s) => s,
@@ -180,6 +195,7 @@ async fn run_server_mode(config_path: &Option<String>) {
 
     let mut handles = Vec::new();
 
+    // REST surface.
     let server_state = state.clone();
     let server_config = config.server.clone();
     handles.push(tokio::spawn(async move {
@@ -188,11 +204,48 @@ async fn run_server_mode(config_path: &Option<String>) {
         }
     }));
 
+    // Scheduler: run due jobs through Pi and deliver their results. A Telegram
+    // failure never stops this loop; a delivery failure is recorded on the run.
+    if config.jobs.enabled {
+        let runner = Arc::new(JobRunner::new(
+            config.pi.clone(),
+            MissingVerdict::parse(&config.jobs.missing_verdict),
+        ));
+        let token = config
+            .telegram
+            .as_ref()
+            .and_then(|telegram| telegram.bot_token.clone());
+        let allowed_users: &[u64] = config
+            .telegram
+            .as_ref()
+            .map(|telegram| telegram.allowed_users.as_slice())
+            .unwrap_or(&[]);
+        let delivery = Arc::new(Delivery::new(token, allowed_users));
+        let dispatch = Arc::new(JobDispatch::new(Arc::clone(&state.store), runner, delivery));
+        let scheduler = Arc::new(Scheduler::new(
+            Arc::clone(&state.store),
+            Arc::new(SystemClock),
+            dispatch,
+            SchedulerConfig::from_jobs(&config.jobs),
+        ));
+        handles.push(tokio::spawn(scheduler.run()));
+        info!(
+            max_concurrent = config.jobs.max_concurrent,
+            "scheduler started"
+        );
+    } else {
+        info!("[jobs].enabled is false; the scheduler is not started");
+    }
+
+    // Telegram connector, with its per-channel session supervisor. A failure to
+    // build or start it is logged and leaves the scheduler running.
+    let mut sessions: Option<Arc<Mutex<HashMap<String, Session>>>> = None;
     if let Some(ref tg_config) = config.telegram {
         if tg_config.bot_token.is_some() {
             let tg_state = state.clone();
             match TelegramConnector::new(tg_config, &config.pi, &config.prompt, tg_state) {
                 Ok(connector) => {
+                    sessions = Some(connector.sessions());
                     handles.push(tokio::spawn(async move {
                         if let Err(e) = connector.start().await {
                             error!("Telegram connector error: {}", e);
@@ -221,11 +274,20 @@ async fn run_server_mode(config_path: &Option<String>) {
     for handle in handles {
         handle.abort();
     }
+
+    // Abort and reap every long-lived Pi child (the channel sessions) so none is
+    // orphaned. Per-job children are short-lived and reaped by the runner on
+    // every path; one still in flight is terminated by its `kill_on_drop`
+    // handle when the runtime shuts down.
+    if let Some(ref sessions) = sessions {
+        shutdown_sessions(sessions).await;
+    }
 }
 
 async fn initialize_state(config: &config::AppConfig) -> Result<AppState, Box<dyn std::error::Error>> {
     let store = Arc::new(Store::new(Paths::database_file().as_path())?);
     let (event_tx, _) = tokio::sync::broadcast::channel(256);
+    let pi_version = server::probe_pi_version(&config.pi.binary);
 
     Ok(AppState {
         store,
@@ -234,5 +296,9 @@ async fn initialize_state(config: &config::AppConfig) -> Result<AppState, Box<dy
         active_connections: Arc::new(AtomicUsize::new(0)),
         port: config.server.port,
         api_key: config.server.api_key.clone(),
+        pi: config.pi.clone(),
+        jobs: config.jobs.clone(),
+        telegram: config.telegram.clone(),
+        pi_version,
     })
 }

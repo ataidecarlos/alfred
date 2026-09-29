@@ -33,6 +33,13 @@ enum Record {
 }
 
 fn main() {
+    // Mirror the real CLI's `--version` so `/api/info` can report a version
+    // when `[pi].binary` points at this double.
+    if std::env::args().any(|arg| arg == "--version") {
+        println!("fake-pi {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut out = stdout.lock();

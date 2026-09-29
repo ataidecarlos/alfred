@@ -13,6 +13,7 @@ mod rest_api {
 
     use serde_json::{json, Value};
 
+    use alfred::config::{JobsConfig, PiConfig};
     use alfred::server::{app, AppState};
     use alfred::store::Store;
 
@@ -42,6 +43,16 @@ mod rest_api {
 
     impl TestServer {
         async fn start(api_key: Option<&str>) -> Self {
+            Self::start_with(api_key, JobsConfig::default(), None).await
+        }
+
+        /// Build a server whose `AppState` carries explicit `[jobs]` and `[pi]`
+        /// configuration, so a test can prove the injected values are used.
+        async fn start_with(
+            api_key: Option<&str>,
+            jobs: JobsConfig,
+            pi_version: Option<&str>,
+        ) -> Self {
             isolated_home();
             let db = tempfile::tempdir().expect("temp db dir");
             let store = Arc::new(Store::new(&db.path().join("rest.db")).expect("store"));
@@ -53,6 +64,10 @@ mod rest_api {
                 active_connections: Arc::new(AtomicUsize::new(0)),
                 port: 0,
                 api_key: api_key.map(str::to_string),
+                pi: PiConfig::default(),
+                jobs,
+                telegram: None,
+                pi_version: pi_version.map(str::to_string),
             };
 
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -301,6 +316,45 @@ mod rest_api {
         assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
         let text = resp.text().await.expect("body");
         assert!(text.contains("minimum watch interval is 900s"), "body was: {text}");
+    }
+
+    #[tokio::test]
+    async fn injected_config_controls_the_watch_floor_and_pi_version() {
+        // Carried over from #10: AppState must carry the *loaded* `[jobs]`/`[pi]`
+        // config, not the defaults. A 60s floor accepts a `*/1` watch that the
+        // default 900s floor rejects, and the injected version is what
+        // `/api/info` reports.
+        let jobs = JobsConfig {
+            min_watch_interval_secs: 60,
+            ..JobsConfig::default()
+        };
+        let server = TestServer::start_with(None, jobs, Some("fixture-9.9")).await;
+
+        let body = json!({
+            "name": "fast-watch",
+            "kind": "watch",
+            "schedule": "*/1 * * * *",
+            "prompt": "x",
+        });
+        let created = server
+            .client
+            .post(server.url("/api/jobs"))
+            .json(&body)
+            .send()
+            .await
+            .expect("post");
+        assert_eq!(created.status(), reqwest::StatusCode::CREATED);
+
+        let info: Value = server
+            .client
+            .get(server.url("/api/info"))
+            .send()
+            .await
+            .expect("info")
+            .json()
+            .await
+            .expect("info json");
+        assert_eq!(info["pi_version"], "fixture-9.9");
     }
 
     #[tokio::test]

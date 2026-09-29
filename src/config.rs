@@ -32,7 +32,7 @@ pub struct ServerConfig {
     pub api_key: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct TelegramConfig {
     pub bot_token: Option<String>,
     #[serde(default)]
@@ -77,7 +77,7 @@ pub struct PiConfig {
 }
 
 /// Scheduling policy for the job model.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct JobsConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,

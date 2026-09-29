@@ -26,6 +26,7 @@ cargo test rest_api        # filter by test name, any binary
 | `tests/rest_api.rs` | REST surface (issue #10) | Jobs and memory endpoints driven in-process on an ephemeral port, including the 401/400/404 paths |
 | `tests/telegram.rs` | Telegram channel (issue #12) | The channel on a Pi session with an in-memory outbound recorder |
 | `tests/delivery.rs` | Job result delivery (issue #13) | Delivery of job results per the report policy against an in-memory recorder |
+| `tests/startup.rs` | Startup wiring (issue #16) | The composed dispatch+delivery path end to end through the double, fail-fast on a non-launchable Pi binary, and reaping of a live channel child on shutdown |
 
 ## The Pi double
 

@@ -162,6 +162,20 @@ pub struct TelegramConnector {
     policy: CompactPolicy,
 }
 
+/// Abort and reap every live channel session.
+///
+/// Each running session is sent Pi's `abort` command, then its child is killed
+/// and waited on, so no `pi --mode rpc` process outlives the server. A failure
+/// is logged, never propagated: shutdown must not be blocked by a wedged child.
+pub async fn shutdown_sessions(sessions: &Arc<Mutex<HashMap<String, Session>>>) {
+    let mut guard = sessions.lock().await;
+    for (channel, session) in guard.iter_mut() {
+        info!(channel = %channel, "channel shutdown: aborting Pi session");
+        session.shutdown().await;
+    }
+    guard.clear();
+}
+
 impl TelegramConnector {
     /// Build the connector from configuration. The system prompt is assembled
     /// once and reused for the channel's session.
@@ -221,6 +235,14 @@ impl TelegramConnector {
     pub fn with_sender(mut self, sender: Arc<dyn MessageSender>) -> Self {
         self.sender = sender;
         self
+    }
+
+    /// A shared handle to the live channel sessions.
+    ///
+    /// Startup holds one so shutdown can abort and reap every long-lived Pi
+    /// child even after the connector itself has been moved into its run task.
+    pub fn sessions(&self) -> Arc<Mutex<HashMap<String, Session>>> {
+        Arc::clone(&self.sessions)
     }
 
     /// Handle one raw Telegram update.

@@ -52,6 +52,14 @@ pub fn compact_request() -> Value {
     json!({"type": "compact"})
 }
 
+/// The exact command Pi receives to abort the in-flight turn.
+///
+/// Kept as a function so shutdown's wire shape is pinned independently of the
+/// transport.
+pub fn abort_request() -> Value {
+    json!({"type": "abort"})
+}
+
 /// When a session should be compacted.
 ///
 /// Deliberately a plain value: the decision is a pure function of the policy
@@ -257,12 +265,23 @@ pub struct Session {
 
 impl Session {
     pub fn new(invocation: PiInvocation) -> Self {
-        Self { invocation, client: None, dead: false, last_activity: Instant::now(), tokens: 0 }
+        Self {
+            invocation,
+            client: None,
+            dead: false,
+            last_activity: Instant::now(),
+            tokens: 0,
+        }
     }
 
     /// A session is alive once its process is running and has not failed.
     pub fn is_alive(&self) -> bool {
         self.client.is_some() && !self.dead
+    }
+
+    /// The operating-system pid of the running child, if any.
+    pub fn child_pid(&self) -> Option<u32> {
+        self.client.as_ref().and_then(PiClient::id)
     }
 
     /// Spawn the Pi subprocess for this channel.
@@ -279,6 +298,20 @@ impl Session {
     pub fn mark_dead(&mut self) {
         self.dead = true;
         self.client = None;
+    }
+
+    /// Abort the in-flight turn and reap the child process.
+    ///
+    /// Used on shutdown: Pi is asked to `abort` (best-effort — a wedged child
+    /// must not block shutdown), then the child is killed and waited on so no
+    /// process outlives the session. The session identity is retained; a later
+    /// message would start a fresh process.
+    pub async fn shutdown(&mut self) {
+        self.dead = true;
+        if let Some(mut client) = self.client.take() {
+            let _ = client.request(abort_request()).await;
+            let _ = client.kill().await;
+        }
     }
 
     /// Send `prompt` and return the assistant text streamed back before the
@@ -523,6 +556,11 @@ mod tests {
         assert_eq!(compact_request(), json!({"type": "compact"}));
         // It must never be `new_session`: that would discard continuity.
         assert_ne!(compact_request().get("type"), Some(&json!("new_session")));
+    }
+
+    #[test]
+    fn abort_request_is_the_rpc_abort_command() {
+        assert_eq!(abort_request(), json!({"type": "abort"}));
     }
 
     // ------------------------------------------------------------- supervisor
