@@ -12,7 +12,7 @@ use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tracing::info;
 
-use crate::config::ServerConfig;
+use crate::config::{JobsConfig, PiConfig, ServerConfig, TelegramConfig};
 use crate::agent::event::AgentEvent;
 
 #[derive(Clone)]
@@ -23,6 +23,37 @@ pub struct AppState {
     pub active_connections: Arc<AtomicUsize>,
     pub port: u16,
     pub api_key: Option<String>,
+    /// The loaded `[pi]` section, so validation and spawning use the user's
+    /// configuration rather than the defaults.
+    pub pi: PiConfig,
+    /// The loaded `[jobs]` section.
+    pub jobs: JobsConfig,
+    /// The loaded `[telegram]` section, when present.
+    pub telegram: Option<TelegramConfig>,
+    /// The Pi version probed at startup, or `None` when Pi is absent.
+    pub pi_version: Option<String>,
+}
+
+/// Probe `binary --version` once at startup.
+///
+/// A missing or failing binary reports `None`, never an error: `/api/info` must
+/// stay healthy even when Pi is absent. The binary is the loaded `[pi].binary`,
+/// not a default.
+pub fn probe_pi_version(binary: &str) -> Option<String> {
+    let output = std::process::Command::new(binary)
+        .arg("--version")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let version = text.trim();
+    if version.is_empty() {
+        None
+    } else {
+        Some(version.to_string())
+    }
 }
 
 async fn connection_tracker(state: axum::extract::State<AppState>, req: Request, next: Next) -> Response {

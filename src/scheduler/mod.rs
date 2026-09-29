@@ -36,7 +36,7 @@ pub const DEFAULT_TICK_SECS: u64 = 30;
 /// recorded `missed`.
 pub const DEFAULT_ONCE_MISFIRE_GRACE_SECS: i64 = 3600;
 
-/// Status recorded by [`StubDispatch`] until the Pi-backed runner lands (#11).
+/// Placeholder run status used by the scheduler tests.
 pub const STUB_STATUS: &str = "noop";
 
 /// A source of the current Unix timestamp.
@@ -61,19 +61,15 @@ impl Clock for SystemClock {
 pub trait Dispatch: Send + Sync {
     /// Run `job` and report how it ended.
     async fn dispatch(&self, job: &Job) -> Result<RunEnd, AlfredError>;
-}
 
-/// Placeholder dispatcher used until #11 supplies the Pi-backed runner.
-///
-/// It records an honest `noop` outcome instead of pretending to execute the
-/// job; the scheduler still records the run row and prunes history around it.
-pub struct StubDispatch;
-
-#[async_trait]
-impl Dispatch for StubDispatch {
-    async fn dispatch(&self, _job: &Job) -> Result<RunEnd, AlfredError> {
-        Ok(RunEnd::new(STUB_STATUS))
-    }
+    /// Called by the scheduler once the run row for `job` has been closed.
+    ///
+    /// The default is a no-op, so a dispatcher that only produces a [`RunEnd`]
+    /// (such as [`crate::jobs::runner::JobRunner`]) is unaffected. The composed
+    /// [`JobDispatch`](crate::jobs::dispatch::JobDispatch) uses it to deliver the
+    /// result: delivery records its outcome against the run id, which does not
+    /// exist until the scheduler has opened and closed the row.
+    async fn after_run(&self, _run_id: &str, _job: &Job, _end: &RunEnd) {}
 }
 
 /// Scheduling policy. Derived from [`JobsConfig`] plus the loop's own constants.
@@ -287,8 +283,11 @@ async fn run_one(
         }
     };
 
-    if let Err(error) = store.record_run_end(&run_id, &end) {
-        tracing::error!(job = %job.name, %run_id, %error, "failed to close run row");
+    match store.record_run_end(&run_id, &end) {
+        Ok(()) => dispatch.after_run(&run_id, &job, &end).await,
+        Err(error) => {
+            tracing::error!(job = %job.name, %run_id, %error, "failed to close run row");
+        }
     }
     if let Err(error) = store.prune_runs(&job.id, max_runs_per_job) {
         tracing::error!(job = %job.name, %error, "failed to prune run history");

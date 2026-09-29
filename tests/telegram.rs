@@ -60,6 +60,10 @@ mod telegram {
             active_connections: Arc::new(AtomicUsize::new(0)),
             port: 0,
             api_key: None,
+            pi: alfred::config::PiConfig::default(),
+            jobs: alfred::config::JobsConfig::default(),
+            telegram: None,
+            pi_version: None,
         };
 
         let mut invocation = fixture_invocation();

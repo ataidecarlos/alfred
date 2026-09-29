@@ -169,6 +169,12 @@ impl PiClient {
         &self.binary
     }
 
+    /// The operating-system process id of the child, or `None` once it has been
+    /// reaped. Used by shutdown tests to prove no child is orphaned.
+    pub fn id(&self) -> Option<u32> {
+        self.child.id()
+    }
+
     /// If the child has already exited, return its status without blocking.
     ///
     /// `None` means the child is still running (or its status could not be

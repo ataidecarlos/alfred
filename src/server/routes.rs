@@ -1,5 +1,3 @@
-use std::sync::OnceLock;
-
 use axum::extract::{Path, State, Json};
 use axum::http::StatusCode;
 use axum::http::header::AUTHORIZATION;
@@ -8,7 +6,6 @@ use axum::extract::FromRequestParts;
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 
-use crate::config::{JobsConfig, PiConfig};
 use crate::error::AlfredError;
 use crate::jobs::{Job, JobKind, JobRun, NewJob, ReportPolicy};
 use crate::memory;
@@ -105,38 +102,9 @@ pub async fn server_info(State(state): State<AppState>) -> Result<Json<ServerInf
         port: state.port,
         uptime_secs: state.start_time.elapsed().as_secs(),
         active_connections: state.active_connections.load(std::sync::atomic::Ordering::Relaxed),
-        pi_version: probe_pi_version(),
+        pi_version: state.pi_version.clone(),
         jobs_enabled,
     }))
-}
-
-/// Probe the Pi version once and cache it for the life of the process.
-///
-/// The binary is the `[pi].binary` default (`"pi"`); carrying the live
-/// `[pi]`/`[jobs]` config into the API is the startup-wiring issue, so until
-/// then the defaults apply. A missing or failing binary reports `None`, never an
-/// error: `/api/info` must stay healthy even when Pi is absent.
-fn probe_pi_version() -> Option<String> {
-    static VERSION: OnceLock<Option<String>> = OnceLock::new();
-    VERSION
-        .get_or_init(|| {
-            let binary = PiConfig::default().binary;
-            let output = std::process::Command::new(&binary)
-                .arg("--version")
-                .output()
-                .ok()?;
-            if !output.status.success() {
-                return None;
-            }
-            let text = String::from_utf8_lossy(&output.stdout);
-            let version = text.trim();
-            if version.is_empty() {
-                None
-            } else {
-                Some(version.to_string())
-            }
-        })
-        .clone()
 }
 
 #[derive(Serialize)]
@@ -292,10 +260,9 @@ impl From<JobBody> for NewJob {
     }
 }
 
-/// The configured watch floor. Startup wiring that carries the live `[jobs]`
-/// config into the API is a later issue; until then the default (900s) applies.
-fn min_watch_interval_secs() -> u64 {
-    JobsConfig::default().min_watch_interval_secs
+/// The configured watch floor, from the injected `[jobs]` config.
+fn min_watch_interval_secs(state: &AppState) -> u64 {
+    state.jobs.min_watch_interval_secs
 }
 
 pub async fn list_jobs(
@@ -310,7 +277,7 @@ pub async fn create_job(
     _auth: AuthUser,
     Json(body): Json<JobBody>,
 ) -> Result<(StatusCode, Json<Job>), ApiError> {
-    let job = state.store.add_job(&body.into(), min_watch_interval_secs())?;
+    let job = state.store.add_job(&body.into(), min_watch_interval_secs(&state))?;
     Ok((StatusCode::CREATED, Json(job)))
 }
 
@@ -329,7 +296,7 @@ pub async fn update_job(
     Json(body): Json<JobBody>,
 ) -> Result<Json<Job>, ApiError> {
     Ok(Json(
-        state.store.update_job(&id, &body.into(), min_watch_interval_secs())?,
+        state.store.update_job(&id, &body.into(), min_watch_interval_secs(&state))?,
     ))
 }
 
@@ -364,7 +331,7 @@ pub async fn list_job_runs(
     _auth: AuthUser,
     Path(id): Path<String>,
 ) -> Result<Json<Vec<JobRun>>, ApiError> {
-    let limit = JobsConfig::default().max_runs_per_job;
+    let limit = state.jobs.max_runs_per_job;
     Ok(Json(state.store.runs_for(&id, limit)?))
 }
 

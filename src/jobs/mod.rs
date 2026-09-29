@@ -8,6 +8,7 @@
 //! [`runner`] turns a due job into a Pi run and reports a [`RunEnd`].
 
 pub mod delivery;
+pub mod dispatch;
 pub mod runner;
 
 use std::str::FromStr;
