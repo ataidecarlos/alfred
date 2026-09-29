@@ -1,0 +1,601 @@
+//! The `alfred` command-line surface.
+//!
+//! This module owns the top-level parser and the `job` subcommands added by
+//! issue #15. The agent-facing commands (`todo`, `webhook`, `remember`) are
+//! issue #9 and are intentionally not here.
+//!
+//! `job run` cannot execute a job yet: the runner is issue #11. Rather than
+//! fake a successful run it returns a clear error naming that issue.
+
+use std::io::Write;
+use std::path::Path;
+use std::str::FromStr;
+
+use chrono::{DateTime, Utc};
+use clap::{ArgGroup, Args, Parser, Subcommand};
+
+use crate::config::load_config;
+use crate::error::AlfredError;
+use crate::jobs::{self, Job, JobKind, JobRun, NewJob, ReportPolicy};
+use crate::paths::Paths;
+use crate::store::Store;
+
+/// Default number of runs `alfred job runs` prints.
+const DEFAULT_RUN_LIMIT: usize = 20;
+
+/// Top-level command line.
+#[derive(Parser, Debug)]
+#[command(name = "alfred", about = "24x7 personal-assistant host", version = env!("CARGO_PKG_VERSION"))]
+pub struct Cli {
+    /// Path to config file
+    #[arg(short, long, global = true)]
+    pub config: Option<String>,
+    /// Subcommand; with none, Alfred runs as the server.
+    #[command(subcommand)]
+    pub command: Option<CliCommand>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum CliCommand {
+    /// Manage jobs: add, list, show, enable, disable, run, runs, remove
+    Job(JobArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct JobArgs {
+    #[command(subcommand)]
+    pub command: JobCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum JobCommand {
+    /// Create a job from exactly one of --cron, --at, or --watch
+    Add(JobAddArgs),
+    /// List all jobs
+    List,
+    /// Show one job by id or name
+    Show {
+        #[arg(value_name = "ID|NAME")]
+        id_or_name: String,
+    },
+    /// Enable a job
+    Enable {
+        #[arg(value_name = "ID|NAME")]
+        id_or_name: String,
+    },
+    /// Disable a job
+    Disable {
+        #[arg(value_name = "ID|NAME")]
+        id_or_name: String,
+    },
+    /// Run a job now (needs issue #11)
+    Run {
+        #[arg(value_name = "ID|NAME")]
+        id_or_name: String,
+    },
+    /// Show a job's run history, newest first
+    Runs {
+        #[arg(value_name = "ID|NAME")]
+        id_or_name: String,
+        /// Maximum number of runs to print
+        #[arg(long, default_value_t = DEFAULT_RUN_LIMIT)]
+        limit: usize,
+    },
+    /// Delete a job and its run history
+    Remove {
+        #[arg(value_name = "ID|NAME")]
+        id_or_name: String,
+    },
+}
+
+/// The arguments of `alfred job add`.
+#[derive(Args, Debug)]
+#[command(group(
+    ArgGroup::new("schedule")
+        .required(true)
+        .multiple(false)
+        .args(["cron", "at", "watch"])
+))]
+pub struct JobAddArgs {
+    /// Job name (unique)
+    #[arg(long)]
+    pub name: String,
+    /// Prompt handed to the agent
+    #[arg(long)]
+    pub prompt: String,
+    /// Recurring schedule: five-field cron, e.g. "0 9 * * *"
+    #[arg(long)]
+    pub cron: Option<String>,
+    /// One-shot time: RFC 3339 or a relative offset such as "+5s", "+10m"
+    #[arg(long)]
+    pub at: Option<String>,
+    /// Polling schedule: five-field cron, at least the configured interval
+    #[arg(long)]
+    pub watch: Option<String>,
+    /// When to deliver the result: always or on_signal
+    #[arg(long, default_value = "on_signal")]
+    pub report: String,
+    /// Delivery target, e.g. "telegram:42"
+    #[arg(long = "deliver-to")]
+    pub deliver_to: Option<String>,
+    /// Model override
+    #[arg(long)]
+    pub model: Option<String>,
+    /// Comma-separated tool allowlist
+    #[arg(long)]
+    pub tools: Option<String>,
+    /// Per-run timeout in seconds
+    #[arg(long, default_value_t = 900)]
+    pub timeout: u64,
+}
+
+impl JobAddArgs {
+    /// Build a [`NewJob`], parsing `--at` and the report/tool lists.
+    fn to_new_job(&self) -> Result<NewJob, AlfredError> {
+        let (kind, schedule, run_at) = if let Some(expression) = &self.cron {
+            (JobKind::Recurring, Some(expression.clone()), None)
+        } else if let Some(expression) = &self.watch {
+            (JobKind::Watch, Some(expression.clone()), None)
+        } else if let Some(at) = &self.at {
+            (JobKind::Once, None, Some(parse_at(at)?))
+        } else {
+            return Err(AlfredError::JobValidation(
+                "one of --cron, --at, or --watch is required".to_string(),
+            ));
+        };
+
+        Ok(NewJob {
+            name: self.name.clone(),
+            kind,
+            schedule,
+            run_at,
+            prompt: self.prompt.clone(),
+            report: ReportPolicy::from_str(&self.report)?,
+            deliver_to: self.deliver_to.clone(),
+            model: self.model.clone(),
+            tools: jobs::decode_tools(self.tools.clone()),
+            timeout_secs: self.timeout,
+        })
+    }
+}
+
+/// Execute a parsed top-level command.
+///
+/// Errors are returned for the caller to print as `ERROR: <message>` on stderr.
+pub fn run(command: CliCommand, config_path: &str) -> Result<(), AlfredError> {
+    match command {
+        CliCommand::Job(args) => {
+            let config = load_config(Path::new(config_path))?;
+            // The server opens `Paths::database_file()`; the CLI must use the
+            // same database so `job list` sees what the server schedules.
+            let store = Store::new(Paths::database_file().as_path())?;
+            let stdout = std::io::stdout();
+            let mut out = stdout.lock();
+            run_job(
+                args.command,
+                &store,
+                config.jobs.min_watch_interval_secs,
+                &mut out,
+            )
+        }
+    }
+}
+
+/// Run one `job` subcommand against `store`.
+///
+/// Split out from [`run`] so tests can supply a temporary database.
+pub fn run_job(
+    command: JobCommand,
+    store: &Store,
+    min_watch_interval_secs: u64,
+    out: &mut dyn Write,
+) -> Result<(), AlfredError> {
+    match command {
+        JobCommand::Add(args) => {
+            let new = args.to_new_job()?;
+            let job = store.add_job(&new, min_watch_interval_secs)?;
+            writeln!(out, "added job '{}' ({})", job.name, job.id)?;
+            Ok(())
+        }
+        JobCommand::List => {
+            let jobs = store.list_jobs()?;
+            write_job_table(out, &jobs)
+        }
+        JobCommand::Show { id_or_name } => {
+            let job = store.get_job(&id_or_name)?;
+            write_job_detail(out, &job)
+        }
+        JobCommand::Enable { id_or_name } => {
+            let job = store.set_enabled(&id_or_name, true)?;
+            writeln!(out, "enabled job '{}' ({})", job.name, job.id)?;
+            Ok(())
+        }
+        JobCommand::Disable { id_or_name } => {
+            let job = store.set_enabled(&id_or_name, false)?;
+            writeln!(out, "disabled job '{}' ({})", job.name, job.id)?;
+            Ok(())
+        }
+        JobCommand::Run { id_or_name } => {
+            // Fail clearly instead of faking a run: the runner is issue #11.
+            let job = store.get_job(&id_or_name)?;
+            Err(AlfredError::JobValidation(format!(
+                "job execution is not implemented yet (issue #11); cannot run '{}'",
+                job.name
+            )))
+        }
+        JobCommand::Runs { id_or_name, limit } => {
+            let runs = store.runs_for(&id_or_name, limit)?;
+            write_run_table(out, &runs)
+        }
+        JobCommand::Remove { id_or_name } => {
+            let job = store.get_job(&id_or_name)?;
+            store.delete_job(&job.id)?;
+            writeln!(out, "removed job '{}' ({})", job.name, job.id)?;
+            Ok(())
+        }
+    }
+}
+
+/// Parse `--at`: an RFC 3339 timestamp, or a relative offset such as `+5s`,
+/// `+10m`, `+2h`, `+1d` measured from now.
+fn parse_at(value: &str) -> Result<i64, AlfredError> {
+    let trimmed = value.trim();
+    if let Some(rest) = trimmed.strip_prefix('+') {
+        let (digits, unit) = split_duration(rest, value)?;
+        let amount: i64 = digits.parse().map_err(|_| {
+            AlfredError::JobValidation(format!(
+                "invalid --at value '{value}': bad amount '{digits}'"
+            ))
+        })?;
+        let multiplier: i64 = match unit {
+            "s" => 1,
+            "m" => 60,
+            "h" => 3_600,
+            "d" => 86_400,
+            other => {
+                return Err(AlfredError::JobValidation(format!(
+                    "invalid --at value '{value}': unknown unit '{other}' (use s, m, h, or d)"
+                )))
+            }
+        };
+        let seconds = amount.checked_mul(multiplier).ok_or_else(|| {
+            AlfredError::JobValidation(format!("invalid --at value '{value}': duration overflows"))
+        })?;
+        let now = Utc::now().timestamp();
+        return now.checked_add(seconds).ok_or_else(|| {
+            AlfredError::JobValidation(format!("invalid --at value '{value}': time overflows"))
+        });
+    }
+
+    DateTime::parse_from_rfc3339(trimmed)
+        .map(|time| time.timestamp())
+        .map_err(|error| {
+            AlfredError::JobValidation(format!("invalid --at value '{value}': {error}"))
+        })
+}
+
+/// Split `5s` into (`5`, `s`), rejecting missing digits or a missing unit.
+fn split_duration<'a>(rest: &'a str, original: &str) -> Result<(&'a str, &'a str), AlfredError> {
+    let boundary = rest
+        .find(|character: char| !character.is_ascii_digit())
+        .unwrap_or(rest.len());
+    let (digits, unit) = rest.split_at(boundary);
+    if digits.is_empty() || unit.is_empty() {
+        return Err(AlfredError::JobValidation(format!(
+            "invalid --at value '{original}': expected a duration like +5s, +10m, +2h, or +1d"
+        )));
+    }
+    Ok((digits, unit))
+}
+
+fn format_timestamp(timestamp: i64) -> String {
+    DateTime::<Utc>::from_timestamp(timestamp, 0)
+        .map(|time| time.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+        .unwrap_or_else(|| timestamp.to_string())
+}
+
+fn format_timestamp_opt(timestamp: Option<i64>) -> String {
+    timestamp
+        .map(format_timestamp)
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn format_tokens(input: Option<i64>, output: Option<i64>) -> String {
+    match (input, output) {
+        (None, None) => "-".to_string(),
+        (input, output) => format!(
+            "{}/{}",
+            input
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            output
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "-".to_string())
+        ),
+    }
+}
+
+fn write_job_table(out: &mut dyn Write, jobs: &[Job]) -> Result<(), AlfredError> {
+    writeln!(
+        out,
+        "{:<36}  {:<20}  {:<9}  {:<16}  {:<7}  {}",
+        "ID", "NAME", "KIND", "SCHEDULE", "ENABLED", "LAST_STATUS"
+    )?;
+    for job in jobs {
+        writeln!(
+            out,
+            "{:<36}  {:<20}  {:<9}  {:<16}  {:<7}  {}",
+            job.id,
+            job.name,
+            job.kind.as_str(),
+            job.schedule.as_deref().unwrap_or("-"),
+            if job.enabled { "yes" } else { "no" },
+            job.last_status.as_deref().unwrap_or("-")
+        )?;
+    }
+    Ok(())
+}
+
+fn write_job_detail(out: &mut dyn Write, job: &Job) -> Result<(), AlfredError> {
+    writeln!(out, "id:          {}", job.id)?;
+    writeln!(out, "name:        {}", job.name)?;
+    writeln!(out, "kind:        {}", job.kind.as_str())?;
+    writeln!(
+        out,
+        "schedule:    {}",
+        job.schedule.as_deref().unwrap_or("-")
+    )?;
+    writeln!(out, "run_at:      {}", format_timestamp_opt(job.run_at))?;
+    writeln!(out, "prompt:      {}", job.prompt)?;
+    writeln!(out, "report:      {}", job.report.as_str())?;
+    writeln!(
+        out,
+        "deliver_to:  {}",
+        job.deliver_to.as_deref().unwrap_or("-")
+    )?;
+    writeln!(out, "model:       {}", job.model.as_deref().unwrap_or("-"))?;
+    writeln!(
+        out,
+        "tools:       {}",
+        if job.tools.is_empty() {
+            "-".to_string()
+        } else {
+            job.tools.join(",")
+        }
+    )?;
+    writeln!(out, "timeout:     {}s", job.timeout_secs)?;
+    writeln!(
+        out,
+        "enabled:     {}",
+        if job.enabled { "yes" } else { "no" }
+    )?;
+    writeln!(out, "last_run:    {}", format_timestamp_opt(job.last_run))?;
+    writeln!(
+        out,
+        "last_status: {}",
+        job.last_status.as_deref().unwrap_or("-")
+    )?;
+    writeln!(out, "created_at:  {}", format_timestamp(job.created_at))?;
+    writeln!(out, "updated_at:  {}", format_timestamp(job.updated_at))?;
+    Ok(())
+}
+
+fn write_run_table(out: &mut dyn Write, runs: &[JobRun]) -> Result<(), AlfredError> {
+    writeln!(
+        out,
+        "{:<20}  {:<20}  {:<10}  {:<10}  {:<9}  {:<10}  {}",
+        "STARTED_AT", "FINISHED_AT", "STATUS", "VERDICT", "DELIVERED", "COST_USD", "TOKENS"
+    )?;
+    for run in runs {
+        writeln!(
+            out,
+            "{:<20}  {:<20}  {:<10}  {:<10}  {:<9}  {:<10}  {}",
+            format_timestamp(run.started_at),
+            format_timestamp_opt(run.finished_at),
+            run.status,
+            run.verdict.as_deref().unwrap_or("-"),
+            if run.delivered { "yes" } else { "no" },
+            run.cost_usd
+                .map(|cost| format!("{cost:.4}"))
+                .unwrap_or_else(|| "-".to_string()),
+            format_tokens(run.tokens_input, run.tokens_output)
+        )?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    fn store() -> (tempfile::TempDir, Store) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::new(&dir.path().join("jobs.db")).expect("open store");
+        (dir, store)
+    }
+
+    fn run(command: JobCommand, store: &Store) -> Result<String, AlfredError> {
+        let mut buffer = Vec::new();
+        run_job(command, store, 900, &mut buffer)?;
+        String::from_utf8(buffer).map_err(|error| AlfredError::JobValidation(error.to_string()))
+    }
+
+    fn add_args(name: &str, prompt: &str) -> JobAddArgs {
+        JobAddArgs {
+            name: name.to_string(),
+            prompt: prompt.to_string(),
+            cron: None,
+            at: Some("+5s".to_string()),
+            watch: None,
+            report: "always".to_string(),
+            deliver_to: None,
+            model: None,
+            tools: None,
+            timeout: 900,
+        }
+    }
+
+    #[test]
+    fn add_list_show_and_remove_round_trip() {
+        let (_dir, store) = store();
+
+        let added = run(JobCommand::Add(add_args("probe", "hello")), &store).expect("add");
+        assert!(added.contains("probe"), "output was: {added}");
+
+        let listed = run(JobCommand::List, &store).expect("list");
+        assert!(listed.contains("probe"), "output was: {listed}");
+        assert!(listed.contains("once"), "output was: {listed}");
+
+        let shown = run(
+            JobCommand::Show {
+                id_or_name: "probe".to_string(),
+            },
+            &store,
+        )
+        .expect("show");
+        assert!(shown.contains("hello"), "output was: {shown}");
+        assert!(shown.contains("report:      always"), "output was: {shown}");
+
+        let removed = run(
+            JobCommand::Remove {
+                id_or_name: "probe".to_string(),
+            },
+            &store,
+        )
+        .expect("remove");
+        assert!(removed.contains("removed"), "output was: {removed}");
+        assert!(store.get_job("probe").is_err(), "job should be gone");
+    }
+
+    #[test]
+    fn watch_below_minimum_reports_the_exact_message() {
+        let (_dir, store) = store();
+        let mut args = add_args("w", "x");
+        args.at = None;
+        args.watch = Some("*/1 * * * *".to_string());
+
+        let error = run(JobCommand::Add(args), &store).expect_err("watch must fail");
+        assert_eq!(error.to_string(), "minimum watch interval is 900s");
+    }
+
+    #[test]
+    fn enable_and_disable_flip_the_stored_flag() {
+        let (_dir, store) = store();
+        run(JobCommand::Add(add_args("probe", "hello")), &store).expect("add");
+
+        run(
+            JobCommand::Disable {
+                id_or_name: "probe".to_string(),
+            },
+            &store,
+        )
+        .expect("disable");
+        assert!(!store.get_job("probe").expect("get").enabled);
+
+        run(
+            JobCommand::Enable {
+                id_or_name: "probe".to_string(),
+            },
+            &store,
+        )
+        .expect("enable");
+        assert!(store.get_job("probe").expect("get").enabled);
+    }
+
+    #[test]
+    fn runs_with_no_history_still_prints_the_header_row() {
+        let (_dir, store) = store();
+        run(JobCommand::Add(add_args("probe", "hello")), &store).expect("add");
+
+        let output = run(
+            JobCommand::Runs {
+                id_or_name: "probe".to_string(),
+                limit: 20,
+            },
+            &store,
+        )
+        .expect("runs");
+        assert!(output.contains("STARTED_AT"), "output was: {output}");
+    }
+
+    #[test]
+    fn run_refuses_and_names_issue_11() {
+        let (_dir, store) = store();
+        run(JobCommand::Add(add_args("probe", "hello")), &store).expect("add");
+
+        let error = run(
+            JobCommand::Run {
+                id_or_name: "probe".to_string(),
+            },
+            &store,
+        )
+        .expect_err("run is not implemented");
+        assert!(error.to_string().contains("#11"), "message was: {error}");
+        assert!(
+            store.runs_for("probe", 10).expect("runs").is_empty(),
+            "a refused run must not record history"
+        );
+    }
+
+    #[test]
+    fn tools_flag_splits_on_commas() {
+        let (_dir, store) = store();
+        let mut args = add_args("probe", "hello");
+        args.tools = Some("bash, todo".to_string());
+        run(JobCommand::Add(args), &store).expect("add");
+
+        assert_eq!(
+            store.get_job("probe").expect("get").tools,
+            vec!["bash".to_string(), "todo".to_string()]
+        );
+    }
+
+    #[test]
+    fn relative_at_is_about_now_plus_the_offset() {
+        let before = Utc::now().timestamp();
+        let at = parse_at("+5s").expect("relative");
+        let after = Utc::now().timestamp();
+        assert!(at >= before + 5 && at <= after + 5, "at was {at}");
+    }
+
+    #[test]
+    fn rfc3339_at_is_parsed() {
+        let expected = DateTime::parse_from_rfc3339("2026-01-02T03:04:05Z")
+            .expect("fixture")
+            .timestamp();
+        assert_eq!(parse_at("2026-01-02T03:04:05Z").expect("rfc3339"), expected);
+    }
+
+    #[test]
+    fn malformed_at_is_rejected() {
+        assert!(parse_at("+5x").is_err());
+        assert!(parse_at("+h").is_err());
+        assert!(parse_at("not-a-date").is_err());
+    }
+
+    #[test]
+    fn clap_requires_exactly_one_schedule_flag() {
+        assert!(
+            Cli::try_parse_from(["alfred", "job", "add", "--name", "n", "--prompt", "p"]).is_err()
+        );
+        assert!(Cli::try_parse_from([
+            "alfred",
+            "job",
+            "add",
+            "--name",
+            "n",
+            "--prompt",
+            "p",
+            "--at",
+            "+5s",
+            "--watch",
+            "*/5 * * * *",
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from([
+            "alfred", "job", "add", "--name", "n", "--prompt", "p", "--at", "+5s",
+        ])
+        .is_ok());
+    }
+}

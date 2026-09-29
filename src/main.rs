@@ -1,4 +1,4 @@
-use alfred::{config, config_watch, connectors, paths, server, store};
+use alfred::{cli, config, config_watch, connectors, paths, server, store};
 
 use std::path::Path;
 use std::sync::Arc;
@@ -9,6 +9,7 @@ use clap::Parser;
 use tracing::{info, error};
 use tracing_subscriber::EnvFilter;
 
+use cli::Cli;
 use config::load_config;
 use connectors::Connector;
 use connectors::telegram::TelegramConnector;
@@ -20,14 +21,6 @@ const DEFAULT_CONFIG_PATH: &str = "config/config.toml";
 const EXAMPLE_CONFIG_PATH: &str = "config/config.toml.example";
 const EXAMPLE_SYSTEM_PROMPT: &str = "prompts/system.md.example";
 const EXAMPLE_USER_PROMPT: &str = "prompts/user.md.example";
-
-#[derive(Parser)]
-#[command(name = "alfred", about = "24x7 personal-assistant host", version = env!("CARGO_PKG_VERSION"))]
-struct Cli {
-    /// Path to config file
-    #[arg(short, long)]
-    config: Option<String>,
-}
 
 fn ensure_directories() {
     let dirs = [
@@ -119,9 +112,18 @@ async fn main() {
     ensure_directories();
     auto_generate_config_files();
 
-    let cli = Cli::parse();
+    let Cli { config, command } = Cli::parse();
 
-    run_server_mode(&cli.config).await;
+    if let Some(command) = command {
+        let config_path = resolve_config_path(config.as_deref());
+        if let Err(error) = cli::run(command, &config_path) {
+            eprintln!("ERROR: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    run_server_mode(&config).await;
 }
 
 fn resolve_config_path(user_path: Option<&str>) -> String {
