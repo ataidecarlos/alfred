@@ -169,6 +169,28 @@ impl PiClient {
         &self.binary
     }
 
+    /// If the child has already exited, return its status without blocking.
+    ///
+    /// `None` means the child is still running (or its status could not be
+    /// read). Mirrors [`std::process::Child::try_wait`].
+    pub fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>> {
+        self.child.try_wait()
+    }
+
+    /// Kill and reap the child if it is still running.
+    ///
+    /// A call on an already-exited child succeeds and returns its status. This
+    /// is the explicit-reap counterpart to the client's `kill_on_drop`: the drop
+    /// path guarantees the process does not outlive the client, while this lets
+    /// a caller observe the exit before reporting it.
+    pub async fn kill(&mut self) -> Option<std::process::ExitStatus> {
+        let _ = self.child.start_kill();
+        match self.child.wait().await {
+            Ok(status) => Some(status),
+            Err(_) => None,
+        }
+    }
+
     /// Stderr captured from the subprocess so far.
     pub fn captured_stderr(&self) -> String {
         self.stderr.lock().map(|captured| captured.clone()).unwrap_or_else(|poisoned| poisoned.into_inner().clone())
