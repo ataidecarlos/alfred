@@ -1,5 +1,6 @@
 use std::path::Path;
-use std::sync::Mutex;
+use std::str::FromStr;
+use std::sync::{Mutex, MutexGuard};
 
 use chrono::Utc;
 use rusqlite::{Connection, params};
@@ -7,6 +8,72 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::AlfredError;
+use crate::jobs::{self, Job, JobKind, JobRun, NewJob, ReportPolicy, RunEnd};
+
+/// The `jobs` columns, in the order [`job_from_row`] reads them.
+const JOB_COLUMNS: &str = "id, name, kind, schedule, run_at, prompt, report, deliver_to, model, \
+     tools, timeout_secs, enabled, last_run, last_status, created_at, updated_at";
+
+/// The `job_runs` columns, in the order [`job_run_from_row`] reads them.
+const RUN_COLUMNS: &str = "id, job_id, started_at, finished_at, status, verdict, output, error, \
+     tokens_input, tokens_output, cost_usd, delivered";
+
+/// Translate a UNIQUE or CHECK violation on a job write into a named error.
+/// Other rusqlite failures pass through as [`AlfredError::Store`].
+fn map_job_write(error: rusqlite::Error) -> AlfredError {
+    let text = error.to_string();
+    if text.contains("UNIQUE constraint failed: jobs.name") {
+        AlfredError::JobNameExists
+    } else if text.contains("CHECK constraint failed") {
+        AlfredError::JobValidation("job row violates a CHECK constraint".to_string())
+    } else {
+        AlfredError::Store(error)
+    }
+}
+
+fn conversion_error(column: usize, error: AlfredError) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(column, rusqlite::types::Type::Text, Box::new(error))
+}
+
+fn job_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
+    let kind: String = row.get(2)?;
+    let report: String = row.get(6)?;
+    Ok(Job {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        kind: JobKind::from_str(&kind).map_err(|error| conversion_error(2, error))?,
+        schedule: row.get(3)?,
+        run_at: row.get(4)?,
+        prompt: row.get(5)?,
+        report: ReportPolicy::from_str(&report).map_err(|error| conversion_error(6, error))?,
+        deliver_to: row.get(7)?,
+        model: row.get(8)?,
+        tools: jobs::decode_tools(row.get(9)?),
+        timeout_secs: row.get::<_, i64>(10)? as u64,
+        enabled: row.get::<_, i64>(11)? != 0,
+        last_run: row.get(12)?,
+        last_status: row.get(13)?,
+        created_at: row.get(14)?,
+        updated_at: row.get(15)?,
+    })
+}
+
+fn job_run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<JobRun> {
+    Ok(JobRun {
+        id: row.get(0)?,
+        job_id: row.get(1)?,
+        started_at: row.get(2)?,
+        finished_at: row.get(3)?,
+        status: row.get(4)?,
+        verdict: row.get(5)?,
+        output: row.get(6)?,
+        error: row.get(7)?,
+        tokens_input: row.get(8)?,
+        tokens_output: row.get(9)?,
+        cost_usd: row.get(10)?,
+        delivered: row.get::<_, i64>(11)? != 0,
+    })
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Todo {
@@ -143,6 +210,222 @@ impl Store {
             changed += conn.execute("UPDATE todos SET due_date = ?1, updated_at = ?2 WHERE id = ?3", params![d, now, id])?;
         }
         Ok(changed > 0)
+    }
+
+    // ------------------------------------------------------------------ jobs
+
+    /// Lock the connection, mapping a poisoned mutex to a typed store error.
+    fn db(&self) -> Result<MutexGuard<'_, Connection>, AlfredError> {
+        self.conn.lock().map_err(|error| {
+            AlfredError::Store(rusqlite::Error::InvalidParameterName(error.to_string()))
+        })
+    }
+
+    /// Validate and insert a job, returning the stored row.
+    pub fn add_job(&self, new: &NewJob, min_watch_interval_secs: u64) -> Result<Job, AlfredError> {
+        new.validate(min_watch_interval_secs)?;
+        let id = Uuid::new_v4().to_string();
+        let now = Utc::now().timestamp();
+        {
+            let conn = self.db()?;
+            conn.execute(
+                "INSERT INTO jobs (id, name, kind, schedule, run_at, prompt, report, deliver_to, model, tools, timeout_secs, enabled, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 1, ?12, ?12)",
+                params![
+                    id,
+                    new.name,
+                    new.kind.as_str(),
+                    new.schedule,
+                    new.run_at,
+                    new.prompt,
+                    new.report.as_str(),
+                    new.deliver_to,
+                    new.model,
+                    jobs::encode_tools(&new.tools),
+                    new.timeout_secs as i64,
+                    now,
+                ],
+            )
+            .map_err(map_job_write)?;
+        }
+        self.get_job(&id)
+    }
+
+    /// All jobs, enabled and disabled, oldest first.
+    pub fn list_jobs(&self) -> Result<Vec<Job>, AlfredError> {
+        let conn = self.db()?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {JOB_COLUMNS} FROM jobs ORDER BY created_at, id"
+        ))?;
+        let jobs = stmt
+            .query_map([], job_from_row)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(jobs)
+    }
+
+    /// Look a job up by id or by name.
+    pub fn get_job(&self, id_or_name: &str) -> Result<Job, AlfredError> {
+        let conn = self.db()?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {JOB_COLUMNS} FROM jobs WHERE id = ?1 OR name = ?1 \
+             ORDER BY (id = ?1) DESC LIMIT 1"
+        ))?;
+        let mut rows = stmt.query_map(params![id_or_name], job_from_row)?;
+        match rows.next() {
+            Some(job) => Ok(job?),
+            None => Err(AlfredError::JobNotFound(id_or_name.to_string())),
+        }
+    }
+
+    /// Validate and fully replace a job's mutable fields.
+    pub fn update_job(
+        &self,
+        id_or_name: &str,
+        new: &NewJob,
+        min_watch_interval_secs: u64,
+    ) -> Result<Job, AlfredError> {
+        new.validate(min_watch_interval_secs)?;
+        let existing = self.get_job(id_or_name)?;
+        let now = Utc::now().timestamp();
+        {
+            let conn = self.db()?;
+            conn.execute(
+                "UPDATE jobs SET name=?1, kind=?2, schedule=?3, run_at=?4, prompt=?5, report=?6, \
+                 deliver_to=?7, model=?8, tools=?9, timeout_secs=?10, updated_at=?11 WHERE id=?12",
+                params![
+                    new.name,
+                    new.kind.as_str(),
+                    new.schedule,
+                    new.run_at,
+                    new.prompt,
+                    new.report.as_str(),
+                    new.deliver_to,
+                    new.model,
+                    jobs::encode_tools(&new.tools),
+                    new.timeout_secs as i64,
+                    now,
+                    existing.id,
+                ],
+            )
+            .map_err(map_job_write)?;
+        }
+        self.get_job(&existing.id)
+    }
+
+    /// Enable or disable a job, returning the updated row.
+    pub fn set_enabled(&self, id_or_name: &str, enabled: bool) -> Result<Job, AlfredError> {
+        let job = self.get_job(id_or_name)?;
+        let now = Utc::now().timestamp();
+        {
+            let conn = self.db()?;
+            conn.execute(
+                "UPDATE jobs SET enabled=?1, updated_at=?2 WHERE id=?3",
+                params![enabled as i64, now, job.id],
+            )?;
+        }
+        self.get_job(&job.id)
+    }
+
+    /// Delete a job and its run history.
+    pub fn delete_job(&self, id_or_name: &str) -> Result<(), AlfredError> {
+        let job = self.get_job(id_or_name)?;
+        let conn = self.db()?;
+        conn.execute("DELETE FROM job_runs WHERE job_id=?1", params![job.id])?;
+        conn.execute("DELETE FROM jobs WHERE id=?1", params![job.id])?;
+        Ok(())
+    }
+
+    /// Enabled jobs that are due at `now`. A stored schedule that no longer
+    /// parses is logged and skipped rather than failing the whole tick.
+    pub fn due_jobs(&self, now: i64) -> Result<Vec<Job>, AlfredError> {
+        let mut due = Vec::new();
+        for job in self.list_jobs()? {
+            match jobs::is_due(&job, now) {
+                Ok(true) => due.push(job),
+                Ok(false) => {}
+                Err(error) => {
+                    tracing::warn!(job = %job.name, %error, "skipping job with invalid schedule");
+                }
+            }
+        }
+        Ok(due)
+    }
+
+    /// Open a run for `job_id`, record it as `running`, and stamp the job's
+    /// `last_run`. Returns the new run id.
+    pub fn record_run_start(&self, job_id: &str) -> Result<String, AlfredError> {
+        let job = self.get_job(job_id)?;
+        let run_id = Uuid::new_v4().to_string();
+        let now = Utc::now().timestamp();
+        let conn = self.db()?;
+        conn.execute(
+            "INSERT INTO job_runs (id, job_id, started_at, status, delivered) \
+             VALUES (?1, ?2, ?3, 'running', 0)",
+            params![run_id, job.id, now],
+        )?;
+        conn.execute(
+            "UPDATE jobs SET last_run=?1, updated_at=?1 WHERE id=?2",
+            params![now, job.id],
+        )?;
+        Ok(run_id)
+    }
+
+    /// Close a run with its terminal fields and mirror the status onto the job.
+    pub fn record_run_end(&self, run_id: &str, end: &RunEnd) -> Result<(), AlfredError> {
+        let finished_at = Utc::now().timestamp();
+        let conn = self.db()?;
+        let changed = conn.execute(
+            "UPDATE job_runs SET finished_at=?1, status=?2, verdict=?3, output=?4, error=?5, \
+             tokens_input=?6, tokens_output=?7, cost_usd=?8, delivered=?9 WHERE id=?10",
+            params![
+                finished_at,
+                end.status,
+                end.verdict,
+                end.output,
+                end.error,
+                end.tokens_input,
+                end.tokens_output,
+                end.cost_usd,
+                end.delivered as i64,
+                run_id,
+            ],
+        )?;
+        if changed == 0 {
+            return Err(AlfredError::JobValidation(format!("run not found: {run_id}")));
+        }
+        conn.execute(
+            "UPDATE jobs SET last_status=?1, updated_at=?2 \
+             WHERE id=(SELECT job_id FROM job_runs WHERE id=?3)",
+            params![end.status, finished_at, run_id],
+        )?;
+        Ok(())
+    }
+
+    /// The most recent runs of a job, newest first.
+    pub fn runs_for(&self, id_or_name: &str, limit: usize) -> Result<Vec<JobRun>, AlfredError> {
+        let job = self.get_job(id_or_name)?;
+        let conn = self.db()?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {RUN_COLUMNS} FROM job_runs WHERE job_id=?1 \
+             ORDER BY started_at DESC, id DESC LIMIT ?2"
+        ))?;
+        let runs = stmt
+            .query_map(params![job.id, limit as i64], job_run_from_row)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(runs)
+    }
+
+    /// Keep only the newest `keep` runs of a job. Returns the number removed.
+    pub fn prune_runs(&self, id_or_name: &str, keep: usize) -> Result<usize, AlfredError> {
+        let job = self.get_job(id_or_name)?;
+        let conn = self.db()?;
+        let removed = conn.execute(
+            "DELETE FROM job_runs WHERE job_id=?1 AND id NOT IN (\
+             SELECT id FROM job_runs WHERE job_id=?1 \
+             ORDER BY started_at DESC, id DESC LIMIT ?2)",
+            params![job.id, keep as i64],
+        )?;
+        Ok(removed)
     }
 }
 
