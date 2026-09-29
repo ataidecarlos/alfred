@@ -73,13 +73,11 @@ def find_api_key() -> str:
 
 @pytest.fixture(scope="session")
 def test_environment(tmp_path_factory):
-    """Create an isolated test environment (config, vault, database)."""
+    """Create an isolated test environment (config, prompts, database)."""
     test_dir = tmp_path_factory.mktemp("alfred_test")
-    vault_dir = test_dir / "vault"
     log_dir = test_dir / "logs"
     prompts_dir = test_dir / "prompts"
 
-    vault_dir.mkdir()
     log_dir.mkdir()
     prompts_dir.mkdir()
 
@@ -88,12 +86,9 @@ def test_environment(tmp_path_factory):
         "You are Alfred, a helpful AI assistant for testing.\n\n"
         "You have access to these tools:\n"
         "- todo: Manage to-do items (add, list, complete, delete)\n"
-        "- memory: Manage memories (store, recall, update, archive)\n"
         "- shell: Execute shell commands\n"
         "- webhook: Send HTTP requests to external services\n\n"
         "When the user asks you to create a todo, use the todo tool with action='add'.\n"
-        "When the user asks you to remember something, use the memory tool with action='store'.\n"
-        "When the user asks you to recall something, use the memory tool with action='recall'.\n"
         "Always confirm actions before executing destructive operations."
     )
     (prompts_dir / "user.md").write_text("")
@@ -125,10 +120,6 @@ def test_environment(tmp_path_factory):
         "scheduler": {
             "enabled": False,
         },
-        "memory": {
-            "enabled": True,
-            "vault_path": str(vault_dir),
-        },
     }
 
     config_file = test_dir / "config.toml"
@@ -138,7 +129,6 @@ def test_environment(tmp_path_factory):
         "test_dir": test_dir,
         "config": config,
         "config_file": config_file,
-        "vault_path": vault_dir,
         "db_path": db_path,
         "log_dir": log_dir,
         "port": port,
@@ -255,9 +245,8 @@ def client(server):
 
 @pytest.fixture(autouse=True)
 def clean_state(server):
-    """Reset database and vault files before each test."""
+    """Reset the database before each test."""
     db_path = server["db_path"]
-    vault_path = server["vault_path"]
 
     # Clean database tables (only if database exists and has tables)
     if db_path.exists():
@@ -268,22 +257,13 @@ def clean_state(server):
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
             tables = {row[0] for row in cursor.fetchall()}
-            for table in ["todos", "memories", "conversations"]:
+            for table in ["todos", "conversations"]:
                 if table in tables:
                     conn.execute(f"DELETE FROM {table}")
             conn.commit()
             conn.close()
         except sqlite3.Error:
             pass  # Database might not be ready yet
-
-    # Clean vault files (keep structure, templates, and _index.md)
-    if vault_path.exists():
-        for category in ["preferences", "facts", "decisions", "lessons", "action-items"]:
-            cat_dir = vault_path / category
-            if cat_dir.exists():
-                for f in cat_dir.glob("*.md"):
-                    if f.name != "_index.md":
-                        f.unlink()
 
     yield
 
@@ -307,19 +287,6 @@ def helpers():
         resp.raise_for_status()
         return resp.json()["reply"]
 
-    def get_vault_files(vault_path, category):
-        """Return list of .md files in a vault category (excluding _index.md)."""
-        cat_dir = vault_path / category
-        if not cat_dir.exists():
-            return []
-        return sorted([
-            f for f in cat_dir.glob("*.md") if f.name != "_index.md"
-        ])
-
-    def read_vault_file(path):
-        """Read and return the content of a vault file."""
-        return path.read_text(encoding="utf-8")
-
     def get_database_rows(db_path, table):
         """Return all rows from a database table."""
         conn = sqlite3.connect(str(db_path))
@@ -331,7 +298,5 @@ def helpers():
 
     return {
         "send_message": send_message,
-        "get_vault_files": get_vault_files,
-        "read_vault_file": read_vault_file,
         "get_database_rows": get_database_rows,
     }
