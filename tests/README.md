@@ -26,7 +26,7 @@ described here is a secondary, live-API end-to-end check; it is not the gate.
 
 `cargo test` is the primary gate and must be green before any change is
 accepted. It runs the Rust unit and integration tests, including the Pi RPC
-boundary against the deterministic fixture at `tests/fixtures/fake-pi.sh` —
+boundary against the deterministic compiled double at `src/bin/fake-pi.rs` —
 no API key and no network required.
 
 The Python suite below requires a live API key and is **not** the primary
@@ -84,16 +84,17 @@ cargo test
 
 The Pi RPC boundary lives in `tests/pi_rpc.rs`. It exercises framing,
 invocation construction, spawn/exit handling, and a full prompt round trip
-against the deterministic fixture at `tests/fixtures/fake-pi.sh`.
+against the deterministic double at `src/bin/fake-pi.rs`.
 
 | File | Verification for | Description |
 |------|------------------|-------------|
 | `tests/pi_rpc.rs` | Pi RPC boundary | JSONL framing, Pi invocation args/env, process lifecycle, and a fake-pi round trip |
-| `tests/fixtures/fake-pi.sh` | Deterministic Pi stand-in | Speaks the RPC protocol on stdin/stdout with no network, key, or model |
+| `src/bin/fake-pi.rs` | Deterministic Pi stand-in | Speaks the RPC protocol on stdin/stdout with no network, key, or model |
 
-Fixture-based tests skip with a clear reason on non-Unix hosts: the fake-pi
-round trip is marked `ignore` on non-Unix with the reason `fake-pi.sh is a Unix
-fixture`, so `cargo test` stays green on Windows.
+The double is a compiled `[[bin]]` target, so the round trip runs on Windows,
+Linux and macOS alike — the test locates it through `CARGO_BIN_EXE_fake-pi` and
+spawns a real executable. On Windows this matters twice over: an npm `.ps1` shim
+(including an npm-installed `pi`) cannot be launched by `CreateProcess`.
 
 For a full end-to-end smoke test against a pristine container, build and run
 the Docker test image:

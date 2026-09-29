@@ -213,14 +213,16 @@ mod pi_rpc {
 
     // ----------------------------------------------------------------- fixture
 
-    #[cfg_attr(not(unix), ignore = "fake-pi.sh is a Unix fixture")]
     #[tokio::test]
     async fn round_trip_prompt_through_fake_pi() {
-        let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("fake-pi.sh");
-        assert!(script.is_file(), "missing fixture at {}", script.display());
+        // A compiled `[[bin]]` target, located by cargo itself, is a real
+        // executable on every platform — unlike the POSIX shell double it
+        // replaces and unlike an npm `.ps1` shim on Windows.
+        let binary = Path::new(env!("CARGO_BIN_EXE_fake-pi"));
+        assert!(binary.is_file(), "missing fixture at {}", binary.display());
 
         let mut config = test_pi_config();
-        config.binary = script.to_string_lossy().into_owned();
+        config.binary = binary.to_string_lossy().into_owned();
 
         let invocation = PiInvocation::job(&config, "fixture system prompt");
         let mut client = PiClient::spawn(&config.binary, invocation.command()).await.unwrap();
