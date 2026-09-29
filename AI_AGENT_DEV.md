@@ -216,6 +216,7 @@ Step 0 records this as evidence: the PAT was removed from `.git/config`, rotated
 | **Permission allowlist denies an operation.** | Test the whole operation set in Step 0. A default-deny block omitted the `subagent` action here and blocked an entire dispatch. Default-deny means unlisted is denied, not warned. |
 | **Fuzzy acceptance criteria** | Do not dispatch. Rewrite until the acceptance is one runnable command with named cases. |
 | **The acceptance command is invalid.** | Execute every new issue's acceptance once during authoring. `cargo test memory prompt` fails — cargo takes one `TESTNAME`; multiple filters need `--`. A worker that "improves" the command instead of reporting it hides an authoring bug. |
+| **A stale baseline is copied between briefs.** | Compute the expected test count from the branch you are actually cutting, not from an earlier issue's brief. Two workers in this run had to reconcile a wrong baseline (34 quoted, 47 real); both were right and the brief was wrong. State the baseline as an observation, not a target — and if a worker reports a mismatch, check the brief before the code. |
 | **Merge conflicts on shared files** | The file-ownership cap: concurrent issues must have disjoint `## Files`. |
 | **Scope creep inside a worker** | `## Constraints` plus `AGENTS.md` ("keep the diff scoped; do not refactor neighbours"). A forced deviation is flagged and reviewed, not hidden. |
 | **Stale inline cross-references** | Keep the authoritative pointer on `Blocked by:`; treat prose `(#n)` as hints. |
