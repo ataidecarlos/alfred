@@ -5,6 +5,7 @@
 //! (`tests/*.rs`) and future embedders.
 
 pub mod agent;
+pub mod cli;
 pub mod config;
 pub mod config_watch;
 pub mod connectors;
