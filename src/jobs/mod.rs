@@ -4,6 +4,10 @@
 //! owns the types, the validation rules applied on insert/update, and the cron
 //! parsing used to decide when a job is due. Persistence lives in
 //! [`crate::store::Store`]; the scheduler loop arrives in a later issue.
+//!
+//! [`runner`] turns a due job into a Pi run and reports a [`RunEnd`].
+
+pub mod runner;
 
 use std::str::FromStr;
 

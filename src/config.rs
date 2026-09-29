@@ -48,7 +48,7 @@ pub struct PromptConfig {
 }
 
 /// How Alfred invokes the Pi subprocess.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct PiConfig {
     #[serde(default = "default_pi_binary")]
     pub binary: String,
