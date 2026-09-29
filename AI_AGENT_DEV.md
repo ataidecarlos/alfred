@@ -51,7 +51,7 @@ Alfred this was issue **#3**, and it blocked everything else.
 | Token scopes cover later operations | scopes in `gh auth status` | Missing scope fails at use, not setup. |
 | Contents write proven | create/delete a scratch ref | Read-only looks fine until the first push. |
 | Commit identity exists | `git config user.name` / `user.email` | A token authenticates; it does not identify a commit. Git refuses to commit without one. |
-| Shell permission config | agent config allow rules | Default-deny silently blocks operations. |
+| Shell permission config | agent config allow rules | Default-deny silently blocks operations. If workers use `git worktree` outside the project root, also grant `external_directory` for that path pattern — otherwise every external read or write stops to ask a human, which defeats an unattended run. |
 | **Subagents can execute and write** | probe: temp-write, repo-write, shell-exec, gh-api | If workers cannot run, nothing is dispatchable. |
 | Labels and milestones exist | `gh label list`, `gh api .../milestones` | Issue creation refers to them; retrofitting edits every issue. |
 | License and third-party notices | `LICENSE`, `THIRD-PARTY-NOTICES.md` | Anything distributing code needs them before the first public commit. |
@@ -212,6 +212,7 @@ Step 0 records this as evidence: the PAT was removed from `.git/config`, rotated
 | **False "done"** | The overseer re-runs the acceptance independently. No command and raw output, no closure. |
 | **Branch collision** — several agents cannot hold different branches in one working tree. | Give each agent its own `git worktree` (`git worktree add ../proj-4 issue/4-slug`), or serialise the agents. Alfred's tree has two worktrees for exactly this. |
 | **A worker runs in the wrong tree.** A subagent inherits the *dispatcher's* working directory, not the worktree you intended. | Put the absolute worktree path in the brief, require the worker to confirm its cwd before its first `git` command, and forbid touching the other trees. Without this, a worker told "work on branch X" stages and commits into someone else's checkout. |
+| **Worktrees outside the project root trip an external-directory approval prompt.** | Grant `external_directory` for the worktree path pattern (for example `~/projects/proj*`) in the agent permission config, or keep worktrees inside the project. A permission prompt mid-run is not a failure the worker can recover from; it silently converts an unattended run into one that needs a human present. |
 | **Permission allowlist denies an operation.** | Test the whole operation set in Step 0. A default-deny block omitted the `subagent` action here and blocked an entire dispatch. Default-deny means unlisted is denied, not warned. |
 | **Fuzzy acceptance criteria** | Do not dispatch. Rewrite until the acceptance is one runnable command with named cases. |
 | **The acceptance command is invalid.** | Execute every new issue's acceptance once during authoring. `cargo test memory prompt` fails — cargo takes one `TESTNAME`; multiple filters need `--`. A worker that "improves" the command instead of reporting it hides an authoring bug. |
