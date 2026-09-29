@@ -117,8 +117,8 @@ fn default_pi_binary() -> String { "pi".into() }
 fn default_pi_api_key_env() -> String { "PI_API_KEY".into() }
 fn default_pi_thinking() -> String { "off".into() }
 fn default_pi_timeout_secs() -> u64 { 900 }
-fn default_idle_compact_secs() -> u64 { 300 }
-fn default_compact_token_threshold() -> u64 { 100_000 }
+fn default_idle_compact_secs() -> u64 { 43_200 }
+fn default_compact_token_threshold() -> u64 { 60_000 }
 fn default_pi_session_dir() -> String {
     Paths::pi_dir().join("sessions").to_string_lossy().to_string()
 }
