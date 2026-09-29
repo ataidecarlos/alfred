@@ -191,7 +191,7 @@ async fn run_server_mode(config_path: &Option<String>) {
     if let Some(ref tg_config) = config.telegram {
         if tg_config.bot_token.is_some() {
             let tg_state = state.clone();
-            match TelegramConnector::new(tg_config, tg_state) {
+            match TelegramConnector::new(tg_config, &config.pi, &config.prompt, tg_state) {
                 Ok(connector) => {
                     handles.push(tokio::spawn(async move {
                         if let Err(e) = connector.start().await {
