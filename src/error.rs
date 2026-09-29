@@ -8,6 +8,15 @@ pub enum AlfredError {
     #[error("LLM error: {0}")]
     Llm(String),
 
+    #[error("pi error: {0}")]
+    Pi(String),
+
+    #[error("failed to spawn Pi binary '{binary}': {message}")]
+    PiSpawn { binary: String, message: String },
+
+    #[error("Pi process '{binary}' exited while running (status: {status}); stderr: {stderr}")]
+    PiProcessExited { binary: String, status: String, stderr: String },
+
     #[error("store error: {0}")]
     Store(#[from] rusqlite::Error),
 

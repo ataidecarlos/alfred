@@ -96,6 +96,14 @@ impl Paths {
         Self::home_dir().join("pi")
     }
 
+    /// Pi's private agent config directory: ~/.alfred/pi-agent
+    ///
+    /// Passed to Pi as `PI_CODING_AGENT_DIR` so it never reads the user's
+    /// personal `~/.pi`.
+    pub fn pi_agent_dir() -> PathBuf {
+        Self::home_dir().join("pi-agent")
+    }
+
     /// Per-job scratch workspace: ~/.alfred/data/jobs/<id>
     pub fn job_workspace_dir(id: &str) -> PathBuf {
         Self::data_dir().join("jobs").join(id)
