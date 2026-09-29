@@ -189,6 +189,7 @@ async fn run_server_mode(config_path: &Option<String>) {
     println!("  Listening on: {}", addr);
     println!("  Config: {}", Paths::config_file().display());
     println!("  Data: {}", Paths::data_dir().display());
+    println!("  Database: {}", config.database_path().display());
     println!("  Logs: {}", Paths::logs_dir().display());
 
     info!("Alfred initialized. Starting services...");
@@ -285,7 +286,7 @@ async fn run_server_mode(config_path: &Option<String>) {
 }
 
 async fn initialize_state(config: &config::AppConfig) -> Result<AppState, Box<dyn std::error::Error>> {
-    let store = Arc::new(Store::new(Paths::database_file().as_path())?);
+    let store = Arc::new(Store::new(config.database_path().as_path())?);
     let pi_version = server::probe_pi_version(&config.pi.binary);
 
     Ok(AppState {

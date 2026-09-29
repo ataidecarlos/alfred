@@ -19,7 +19,6 @@ use crate::config::load_config;
 use crate::error::AlfredError;
 use crate::jobs::{self, Job, JobKind, JobRun, NewJob, ReportPolicy};
 use crate::memory;
-use crate::paths::Paths;
 use crate::store::Store;
 use crate::webhook;
 
@@ -269,9 +268,10 @@ pub async fn run(command: CliCommand, config_path: &str) -> Result<(), AlfredErr
     match command {
         CliCommand::Job(args) => {
             let config = load_config(Path::new(config_path))?;
-            // The server opens `Paths::database_file()`; the CLI must use the
-            // same database so `job list` sees what the server schedules.
-            let store = Store::new(Paths::database_file().as_path())?;
+            // Resolve the database the same way the server does, so `job list`
+            // sees what the server schedules and `ALFRED_DATA_DIR` isolates a
+            // run. See `config::resolve_database_path` for the precedence.
+            let store = Store::new(config.database_path().as_path())?;
             let stdout = std::io::stdout();
             let mut out = stdout.lock();
             run_job(
@@ -282,7 +282,10 @@ pub async fn run(command: CliCommand, config_path: &str) -> Result<(), AlfredErr
             )
         }
         CliCommand::Todo(args) => {
-            let store = Store::new(Paths::database_file().as_path())?;
+            // The todo store is the same database, so it must resolve through
+            // the config too rather than the hard-coded home path.
+            let config = load_config(Path::new(config_path))?;
+            let store = Store::new(config.database_path().as_path())?;
             let stdout = std::io::stdout();
             let mut out = stdout.lock();
             run_todo(args.command, &store, &mut out)
