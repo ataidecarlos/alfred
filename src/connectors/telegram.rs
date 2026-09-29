@@ -3,11 +3,9 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tracing::{info, error, warn};
 
-use crate::agent::{AgentLoopContext, run_agent_loop};
 use crate::connectors::Connector;
 use crate::error::AlfredError;
 use crate::server::AppState;
-use crate::types::{Message, UserMessage, Content};
 
 pub struct TelegramConnector {
     client: Client,
@@ -120,13 +118,6 @@ impl TelegramConnector {
 
         info!("Telegram message from user {}: {}", from.id, text);
 
-        // Handle commands
-        if text.starts_with("/clear") {
-            self.state.store.save_conversation(&from.id.to_string(), "telegram", &[])?;
-            self.send_reply(chat.id, "Conversation cleared.").await?;
-            return Ok(());
-        }
-
         if text.starts_with("/todos") {
             match self.state.store.list_todos() {
                 Ok(todos) if todos.is_empty() => {
@@ -146,59 +137,9 @@ impl TelegramConnector {
             return Ok(());
         }
 
-        if text.starts_with("/memories") {
-            match self.state.store.list_memories() {
-                Ok(memories) if memories.is_empty() => {
-                    self.send_reply(chat.id, "No memories stored.").await?;
-                }
-                Ok(memories) => {
-                    let formatted: Vec<String> = memories.iter().map(|m| format!("- {}", m.content)).collect();
-                    self.send_reply(chat.id, &formatted.join("\n")).await?;
-                }
-                Err(e) => {
-                    self.send_reply(chat.id, &format!("Error: {}", e)).await?;
-                }
-            }
-            return Ok(());
-        }
-
-        // Regular message - run agent loop
-        let user_id = from.id.to_string();
-        let mut messages = self.state.store.load_conversation(&user_id, "telegram")
-            .unwrap_or(None)
-            .unwrap_or_default();
-
-        messages.push(Message::User(UserMessage {
-            content: vec![Content::Text(crate::types::TextContent { text: text.clone() })],
-            timestamp: chrono::Utc::now(),
-        }));
-
-        let event_tx = self.state.event_tx.clone();
-        let mut ctx = AgentLoopContext {
-            system_prompt: self.state.system_prompt.clone(),
-            messages,
-            provider: self.state.provider().await,
-            model: self.state.model().await,
-            tools: self.state.tools.clone(),
-            event_tx,
-            max_turns: 5,
-            laya: crate::laya::LayaModel::default(),
-        };
-
-        run_agent_loop(&mut ctx).await;
-
-        // Get reply
-        let reply = ctx.messages.iter().rev().find_map(|m| {
-            if matches!(m, Message::Assistant(_)) {
-                Some(crate::types::extract_text(m))
-            } else {
-                None
-            }
-        }).unwrap_or_else(|| "I could not generate a response.".into());
-
-        self.send_reply(chat.id, &reply).await?;
-        self.state.store.save_conversation(&user_id, "telegram", &ctx.messages)?;
-
+        // Conversational replies are served by a Pi session; that channel
+        // handler is wired in a later issue. Nothing to do until then.
+        info!("No channel handler configured for Telegram message from user {}", from.id);
         Ok(())
     }
 }

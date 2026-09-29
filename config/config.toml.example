@@ -1,35 +1,7 @@
 [server]
 port = 8080
-host = "0.0.0.0"
-
-[llm]
-# OpenCode Go is the default: OpenAI-compatible and billed through the Zen
-# gateway. Swap model below for a different OpenCode Go model if needed
-# (see https://opencode.ai/zen for the catalog).
-default_provider = "opencode-go"
-
-[llm.providers.opencode-go]
-api_key = "${OPENCODE_GO_API_KEY}"
-# Cheapest available model on OpenCode Go (free tier).
-model = "space-bunny-free"
-base_url = "https://opencode.ai/zen/go/v1"
-
-[llm.providers.openai]
-api_key = "${OPENAI_API_KEY}"
-model = "gpt-4o"
-
-[llm.providers.anthropic]
-api_key = "${ANTHROPIC_API_KEY}"
-model = "claude-sonnet-4-20250514"
-
-[llm.providers.google]
-api_key = "${GOOGLE_API_KEY}"
-model = "gemini-2.0-flash"
-
-[llm.providers.deepseek]
-api_key = "${DEEPSEEK_API_KEY}"
-model = "deepseek-v4-flash"
-base_url = "https://api.deepseek.com"
+host = "127.0.0.1"
+# api_key = "${ALFRED_API_KEY}"
 
 # [telegram]
 # bot_token = "${TELEGRAM_BOT_TOKEN}"
@@ -39,23 +11,26 @@ base_url = "https://api.deepseek.com"
 system_prompt_file = "prompts/system.md"
 user_prompt_file = "prompts/user.md"
 
-[scheduler]
-enabled = true
+[pi]
+# The Pi binary Alfred runs as a subprocess.
+binary = "pi"
+# Environment variable that holds the provider API key. The key is passed to
+# the subprocess by environment, never by --api-key.
+api_key_env = "PI_API_KEY"
+provider = "opencode-go"
+model = "space-bunny-free"
+thinking = "off"
+jobs_tools = []
+channel_tools = []
+timeout_secs = 900
+idle_compact_secs = 300
+compact_token_threshold = 100000
+session_dir = "~/.alfred/pi/sessions"
+extra_args = []
 
-[memory]
+[jobs]
 enabled = true
-vault_path = "~/alfred"
-mode = "auto"
-cli_check_interval_secs = 300
-retrieval_review_threshold_days = 90
-distillation_interval_secs = 7200
-cloud_provider = "openai"
-cloud_model = "gpt-4o-mini"
-cloud_monthly_limit = 5.0
-local_preprocessing = false
-local_backend = "auto"
-local_model = "phi-4-mini-instruct"
-full_local = false
-local_llm_provider = "ollama"
-local_llm_base_url = "http://localhost:11434/v1"
-local_llm_model = "qwen3:8b"
+max_concurrent = 2
+min_watch_interval_secs = 900
+max_runs_per_job = 100
+missing_verdict = "notify"

@@ -81,7 +81,23 @@ impl Paths {
         Self::prompts_dir().join("user.md")
     }
 
-    pub fn themes_dir() -> PathBuf {
-        Self::config_dir().join("themes")
+    /// File-backed memories: ~/.alfred/config/memories.md
+    pub fn memories_file() -> PathBuf {
+        Self::config_dir().join("memories.md")
+    }
+
+    /// Pi skills shipped with Alfred: ~/.alfred/skills
+    pub fn skills_dir() -> PathBuf {
+        Self::home_dir().join("skills")
+    }
+
+    /// Alfred's private Pi home: ~/.alfred/pi
+    pub fn pi_dir() -> PathBuf {
+        Self::home_dir().join("pi")
+    }
+
+    /// Per-job scratch workspace: ~/.alfred/data/jobs/<id>
+    pub fn job_workspace_dir(id: &str) -> PathBuf {
+        Self::data_dir().join("jobs").join(id)
     }
 }

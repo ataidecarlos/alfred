@@ -5,7 +5,6 @@ Alfred is a lightweight AI agent that runs as a 24/7 server, providing automatio
 ## Features
 
 - **Multi-provider LLM support**: OpenCode Go, OpenAI, Anthropic, Google, DeepSeek
-- **Laya decision layer**: a local confidence scorer answers routine requests directly and delegates everything else to the configured LLM
 - **Built-in tools**: Shell command, Webhook, Todo management
 - **Multiple interfaces**: REST API, Telegram connector, and a terminal UI (TUI) with a command palette and an interactive control center
 - **Kira ticketing**: shared ticketing system for AI agents, with autonomous development support
