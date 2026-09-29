@@ -421,6 +421,33 @@ impl Store {
         Ok(())
     }
 
+    /// Record the outcome of delivering a run's output.
+    ///
+    /// Sets `delivered`; when `error` is `Some`, it is appended to the run's
+    /// `error` column, preserving any text already there. `status` and `output`
+    /// are never touched, so a delivery failure cannot turn a successful run
+    /// into a failed one and its output is retained. Returns
+    /// [`AlfredError::JobValidation`] when `run_id` is unknown.
+    pub fn record_delivery(
+        &self,
+        run_id: &str,
+        delivered: bool,
+        error: Option<&str>,
+    ) -> Result<(), AlfredError> {
+        let conn = self.db()?;
+        let changed = conn.execute(
+            "UPDATE job_runs SET delivered=?1, \
+             error = CASE WHEN ?2 IS NULL THEN error \
+                          ELSE COALESCE(NULLIF(error, '') || '; ', '') || ?2 END \
+             WHERE id=?3",
+            params![delivered as i64, error, run_id],
+        )?;
+        if changed == 0 {
+            return Err(AlfredError::JobValidation(format!("run not found: {run_id}")));
+        }
+        Ok(())
+    }
+
     /// The most recent runs of a job, newest first.
     pub fn runs_for(&self, id_or_name: &str, limit: usize) -> Result<Vec<JobRun>, AlfredError> {
         let job = self.get_job(id_or_name)?;
