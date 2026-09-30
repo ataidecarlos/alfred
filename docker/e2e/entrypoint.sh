@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Entrypoint for the long-lived Alfred e2e container.
 #
-# Registers the recurring dummy-task suite through the Alfred scheduler CLI,
-# starts the cron daemon, then runs the Alfred server in the foreground (as
-# PID 1). The task suite is also run once at startup so the report file exists
-# immediately instead of waiting for the first cron tick.
+# Starts the Alfred server in the foreground (as PID 1) and runs the
+# feature-exercise suite once at startup, so e2e_report.jsonl exists
+# immediately. The jobs are owned by Alfred's own scheduler and executed with
+# `alfred job run`; there is no OS cron and the container runs as the
+# unprivileged `alfred` user.
 set -euo pipefail
 
 export HOME="${HOME:-/home/alfred}"
@@ -15,13 +16,6 @@ DATA_DIR="$HOME/.alfred/data"
 TASKS="/opt/alfred/e2e/dummy_tasks.sh"
 
 mkdir -p "$DATA_DIR"
-
-# Register the recurring job through the Alfred scheduler CLI so the cron entry
-# is owned/managed by Alfred rather than hand-written.
-alfred scheduler add '*/5 * * * *' "$TASKS" >/dev/null
-
-# Start the cron daemon (backgrounds itself).
-cron
 
 # Start the server.
 alfred &

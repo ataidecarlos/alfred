@@ -5,6 +5,9 @@
 # feature checks. Mirrors the root Dockerfile but ships an OpenCode Go config
 # and a container-level HEALTHCHECK so `docker inspect ... State.Health.Status`
 # can gate the harness.
+#
+# The suite is driven by Alfred's own scheduler, so there is no OS cron and the
+# container runs as the unprivileged `alfred` user (uid 10001).
 # ---------------------------------------------------------------------------
 
 # Stage 1: compile Alfred from source.
@@ -22,13 +25,29 @@ COPY src ./src
 RUN cargo build --release
 
 # Stage 2: minimal runtime image.
-FROM debian:bookworm-slim
+# The Node base image supplies the Node >= 22.19 runtime and npm that the Pi
+# dependency needs; Alfred delegates the agent loop to Pi at runtime.
+FROM node:22-bookworm-slim
 
-# curl is required by the HEALTHCHECK and smoke tests; cron runs the recurring
-# feature-exercise suite registered through the Alfred scheduler CLI.
+# curl is required by the HEALTHCHECK and smoke tests. cron is no longer needed:
+# the e2e suite is owned by Alfred's own scheduler.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl libssl3 cron \
+    && apt-get install -y --no-install-recommends ca-certificates curl libssl3 \
     && rm -rf /var/lib/apt/lists/*
+
+# Pi is a RUNTIME dependency, not a build dependency. Install it from npm (the
+# same method and package .github/workflows/release.yml pins) and fail the build
+# loudly if it is missing, rather than shipping a container that cannot run
+# jobs. The version is read from the release workflow instead of being retyped,
+# so the image and the release pipeline share one pin and cannot drift; `.github`
+# is kept in the build context for exactly this reason (see .dockerignore).
+COPY .github/workflows/release.yml /tmp/pi-version.yml
+RUN PI_VERSION="$(sed -n 's/^[[:space:]]*PI_VERSION:[[:space:]]*"\([^"]*\)".*/\1/p' /tmp/pi-version.yml)" \
+    && test -n "$PI_VERSION" \
+    && npm install -g "@earendil-works/pi-coding-agent@${PI_VERSION}" \
+    && rm -f /tmp/pi-version.yml \
+    && command -v pi \
+    && pi --version
 
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin alfred
 
@@ -55,6 +74,7 @@ EXPOSE 3000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=3 \
     CMD curl -fsS http://localhost:3000/health || exit 1
 
-# Runs as root so the cron daemon can manage the scheduled task suite; the
-# entrypoint then starts Alfred in the foreground.
+# Runs as the unprivileged alfred user; the scheduler owns the jobs, so no
+# root-owned cron daemon is needed.
+USER alfred
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

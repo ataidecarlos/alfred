@@ -14,9 +14,10 @@ prompts/user.md
 data
 logs
 
-# Tests and tooling
+# Tests and tooling. `.github` is deliberately NOT ignored: the runtime images
+# read PI_VERSION from .github/workflows/release.yml so the image and the
+# release pipeline share a single Pi pin (see Dockerfile).
 tests
-.github
 *.md
 
 # OS / editor
