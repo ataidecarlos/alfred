@@ -17,14 +17,12 @@ impl Paths {
             std::env::var("USERPROFILE")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| {
-                    let home = std::env::var("HOME")
-                        .expect("Cannot determine home directory");
+                    let home = std::env::var("HOME").expect("Cannot determine home directory");
                     PathBuf::from(home)
                 })
                 .join(".alfred")
         } else {
-            let home = std::env::var("HOME")
-                .expect("Cannot determine home directory");
+            let home = std::env::var("HOME").expect("Cannot determine home directory");
             PathBuf::from(home).join(".alfred")
         }
     }
@@ -73,7 +71,12 @@ impl Paths {
                 .unwrap_or_else(|_| Self::config_file())
         } else {
             std::env::var("HOME")
-                .map(|home| PathBuf::from(home).join(".config").join("alfred").join("config.toml"))
+                .map(|home| {
+                    PathBuf::from(home)
+                        .join(".config")
+                        .join("alfred")
+                        .join("config.toml")
+                })
                 .unwrap_or_else(|_| Self::config_file())
         }
     }
@@ -162,9 +165,10 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let expected = dir.path().to_path_buf();
 
-        let (data_dir, database) = with_data_dir_override(Some(dir.path().to_str().unwrap()), || {
-            (Paths::data_dir(), Paths::database_file())
-        });
+        let (data_dir, database) =
+            with_data_dir_override(Some(dir.path().to_str().unwrap()), || {
+                (Paths::data_dir(), Paths::database_file())
+            });
 
         assert_eq!(data_dir, expected);
         assert_eq!(database, expected.join("alfred.db"));
@@ -179,4 +183,3 @@ mod tests {
         assert_eq!(blank, Paths::home_dir().join("data"));
     }
 }
-

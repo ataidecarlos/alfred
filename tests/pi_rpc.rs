@@ -26,7 +26,11 @@ mod pi_rpc {
     }
 
     impl<'a> AsyncRead for OneByteAtATime<'a> {
-        fn poll_read(self: Pin<&mut Self>, _cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
             let this = self.get_mut();
             let bytes = this.bytes;
             if let Some((first, rest)) = bytes.split_first() {
@@ -42,7 +46,9 @@ mod pi_rpc {
     #[tokio::test]
     async fn framing_never_splits_on_u2028_or_u2029() {
         let line = "{\"type\":\"message_update\",\"text\":\"left\u{2028}middle\u{2029}right\"}\n";
-        let mut reader = JsonlReader::new(OneByteAtATime { bytes: line.as_bytes() });
+        let mut reader = JsonlReader::new(OneByteAtATime {
+            bytes: line.as_bytes(),
+        });
         let message = reader.next_message().await.unwrap().expect("one message");
         assert_eq!(message["text"], "left\u{2028}middle\u{2029}right");
         assert!(reader.next_message().await.unwrap().is_none());
@@ -63,7 +69,11 @@ mod pi_rpc {
     async fn unparseable_lines_are_skipped_not_fatal() {
         let data = "not json at all\n\n{\"type\":\"response\",\"success\":true}\n";
         let mut reader = JsonlReader::new(data.as_bytes());
-        let message = reader.next_message().await.unwrap().expect("valid record after garbage");
+        let message = reader
+            .next_message()
+            .await
+            .unwrap()
+            .expect("valid record after garbage");
         assert_eq!(message["type"], "response");
         assert_eq!(message["success"], true);
         assert!(reader.next_message().await.unwrap().is_none());
@@ -73,7 +83,11 @@ mod pi_rpc {
     async fn invalid_utf8_lines_are_skipped_not_fatal() {
         let data: &[u8] = b"\xff\xfe not utf8\n{\"type\":\"agent_settled\"}\n";
         let mut reader = JsonlReader::new(data);
-        let message = reader.next_message().await.unwrap().expect("valid record after invalid utf8");
+        let message = reader
+            .next_message()
+            .await
+            .unwrap()
+            .expect("valid record after invalid utf8");
         assert_eq!(message["type"], "agent_settled");
         assert!(reader.next_message().await.unwrap().is_none());
     }
@@ -86,7 +100,10 @@ mod pi_rpc {
         let invocation = PiInvocation::job(&config, "assembled system prompt");
         let command = invocation.command();
 
-        assert_eq!(command.as_std().get_program().to_string_lossy(), "pi-fixture");
+        assert_eq!(
+            command.as_std().get_program().to_string_lossy(),
+            "pi-fixture"
+        );
 
         let expected: Vec<String> = vec![
             "--mode".into(),
@@ -114,7 +131,10 @@ mod pi_rpc {
             env_of(&envs, "PI_CODING_AGENT_DIR"),
             Paths::pi_agent_dir().to_string_lossy().into_owned()
         );
-        assert_eq!(env_of(&envs, "PI_CODING_AGENT_SESSION_DIR"), config.session_dir.clone());
+        assert_eq!(
+            env_of(&envs, "PI_CODING_AGENT_SESSION_DIR"),
+            config.session_dir.clone()
+        );
         assert_eq!(env_of(&envs, "PI_SKIP_VERSION_CHECK"), "1");
         assert_eq!(env_of(&envs, "PI_TELEMETRY"), "0");
         assert_eq!(env_of(&envs, "PI_OFFLINE"), "1");
@@ -151,7 +171,10 @@ mod pi_rpc {
         ];
         let args = invocation_args(&command);
         assert_eq!(args, expected);
-        assert!(!args.iter().any(|arg| arg == "--no-session"), "channels keep their session: {args:?}");
+        assert!(
+            !args.iter().any(|arg| arg == "--no-session"),
+            "channels keep their session: {args:?}"
+        );
 
         let envs = invocation_envs(&command);
         assert_eq!(
@@ -174,7 +197,10 @@ mod pi_rpc {
         assert_eq!(env_of(&invocation_envs(&command), KEY_VAR), KEY_VALUE);
         let args = invocation_args(&command);
         assert!(!args.iter().any(|arg| arg == "--api-key"), "args: {args:?}");
-        assert!(!args.iter().any(|arg| arg.contains(KEY_VALUE)), "args leak the key: {args:?}");
+        assert!(
+            !args.iter().any(|arg| arg.contains(KEY_VALUE)),
+            "args leak the key: {args:?}"
+        );
     }
 
     #[test]
@@ -182,7 +208,10 @@ mod pi_rpc {
         let mut config = test_pi_config();
         config.extra_args = vec!["--verbose".into(), "--no-extensions".into()];
         let args = invocation_args(&PiInvocation::job(&config, "sys").command());
-        assert_eq!(&args[args.len() - 2..], ["--verbose".to_string(), "--no-extensions".to_string()]);
+        assert_eq!(
+            &args[args.len() - 2..],
+            ["--verbose".to_string(), "--no-extensions".to_string()]
+        );
     }
 
     // ---------------------------------------------------------------- process
@@ -190,7 +219,9 @@ mod pi_rpc {
     #[tokio::test]
     async fn failed_spawn_names_the_binary_path() {
         let binary = "alfred-issue5-missing-pi-binary";
-        let error = PiClient::spawn(binary, Command::new(binary)).await.unwrap_err();
+        let error = PiClient::spawn(binary, Command::new(binary))
+            .await
+            .unwrap_err();
         match error {
             AlfredError::PiSpawn { binary: named, .. } => assert_eq!(named, binary),
             other => panic!("expected PiSpawn, got {other:?}"),
@@ -199,13 +230,22 @@ mod pi_rpc {
 
     #[tokio::test]
     async fn stream_end_reports_process_exit_with_captured_stderr() {
-        let mut client = PiClient::spawn("failing-fixture", failing_process()).await.unwrap();
+        let mut client = PiClient::spawn("failing-fixture", failing_process())
+            .await
+            .unwrap();
         let error = client.next_message().await.unwrap_err();
         match error {
-            AlfredError::PiProcessExited { binary, status, stderr } => {
+            AlfredError::PiProcessExited {
+                binary,
+                status,
+                stderr,
+            } => {
                 assert_eq!(binary, "failing-fixture");
                 assert!(!status.is_empty());
-                assert!(stderr.contains("simulated pi failure"), "stderr was {stderr:?}");
+                assert!(
+                    stderr.contains("simulated pi failure"),
+                    "stderr was {stderr:?}"
+                );
             }
             other => panic!("expected PiProcessExited, got {other:?}"),
         }
@@ -225,7 +265,9 @@ mod pi_rpc {
         config.binary = binary.to_string_lossy().into_owned();
 
         let invocation = PiInvocation::job(&config, "fixture system prompt");
-        let mut client = PiClient::spawn(&config.binary, invocation.command()).await.unwrap();
+        let mut client = PiClient::spawn(&config.binary, invocation.command())
+            .await
+            .unwrap();
 
         // Responses echo the id, generated or explicit.
         let state = client.request(json!({"type": "get_state"})).await.unwrap();
@@ -233,12 +275,18 @@ mod pi_rpc {
         assert!(state.id.is_some(), "response should echo a generated id");
         assert_eq!(state.data.as_ref().unwrap()["model"]["id"], "fake-model");
 
-        let explicit = client.request(json!({"id": "custom-1", "type": "get_state"})).await.unwrap();
+        let explicit = client
+            .request(json!({"id": "custom-1", "type": "get_state"}))
+            .await
+            .unwrap();
         assert_eq!(explicit.id, Some(json!("custom-1")));
 
         // Prompt in, assistant text out. The fixture also emits one malformed
         // line mid-stream, which the client must skip.
-        let accepted = client.request(json!({"type": "prompt", "message": "ping"})).await.unwrap();
+        let accepted = client
+            .request(json!({"type": "prompt", "message": "ping"}))
+            .await
+            .unwrap();
         assert!(accepted.success, "prompt failed: {accepted:?}");
 
         let mut saw_agent_start = false;
@@ -257,12 +305,21 @@ mod pi_rpc {
             }
         }
         assert!(settled, "fixture never emitted agent_settled");
-        assert!(saw_agent_start && saw_message_end, "missing lifecycle events");
+        assert!(
+            saw_agent_start && saw_message_end,
+            "missing lifecycle events"
+        );
 
-        let text = client.request(json!({"type": "get_last_assistant_text"})).await.unwrap();
+        let text = client
+            .request(json!({"type": "get_last_assistant_text"}))
+            .await
+            .unwrap();
         assert_eq!(text.data.as_ref().unwrap()["text"], "reply to: ping");
 
-        let stats = client.request(json!({"type": "get_session_stats"})).await.unwrap();
+        let stats = client
+            .request(json!({"type": "get_session_stats"}))
+            .await
+            .unwrap();
         assert!(stats.success, "get_session_stats failed: {stats:?}");
     }
 
@@ -280,13 +337,20 @@ mod pi_rpc {
             timeout_secs: 60,
             idle_compact_secs: 60,
             compact_token_threshold: 1000,
-            session_dir: Paths::pi_dir().join("sessions").to_string_lossy().into_owned(),
+            session_dir: Paths::pi_dir()
+                .join("sessions")
+                .to_string_lossy()
+                .into_owned(),
             extra_args: Vec::new(),
         }
     }
 
     fn invocation_args(command: &Command) -> Vec<String> {
-        command.as_std().get_args().map(|arg| arg.to_string_lossy().into_owned()).collect()
+        command
+            .as_std()
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
     }
 
     fn invocation_envs(command: &Command) -> HashMap<String, String> {
@@ -294,26 +358,37 @@ mod pi_rpc {
             .as_std()
             .get_envs()
             .map(|(key, value)| {
-                (key.to_string_lossy().into_owned(), value.map(|v| v.to_string_lossy().into_owned()).unwrap_or_default())
+                (
+                    key.to_string_lossy().into_owned(),
+                    value
+                        .map(|v| v.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                )
             })
             .collect()
     }
 
     fn env_of(envs: &HashMap<String, String>, key: &str) -> String {
-        envs.get(key).cloned().unwrap_or_else(|| panic!("environment variable {key} was not set"))
+        envs.get(key)
+            .cloned()
+            .unwrap_or_else(|| panic!("environment variable {key} was not set"))
     }
 
     #[cfg(unix)]
     fn failing_process() -> Command {
         let mut command = Command::new("sh");
-        command.arg("-c").arg("echo 'simulated pi failure' 1>&2; exit 3");
+        command
+            .arg("-c")
+            .arg("echo 'simulated pi failure' 1>&2; exit 3");
         command
     }
 
     #[cfg(windows)]
     fn failing_process() -> Command {
         let mut command = Command::new("cmd");
-        command.arg("/C").arg("echo simulated pi failure 1>&2 & exit 3");
+        command
+            .arg("/C")
+            .arg("echo simulated pi failure 1>&2 & exit 3");
         command
     }
 }

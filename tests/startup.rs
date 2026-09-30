@@ -209,8 +209,8 @@ mod startup {
         store.record_run_end(&run_id, &end).expect("end");
 
         let recorder = Arc::new(Recorder::default());
-        let delivery = Delivery::new(Some("test-token".to_string()), &[])
-            .with_sender(recorder.clone());
+        let delivery =
+            Delivery::new(Some("test-token".to_string()), &[]).with_sender(recorder.clone());
 
         delivery.deliver(&store, &run_id, &job, &end).await;
 
@@ -271,8 +271,7 @@ mod startup {
     #[tokio::test]
     async fn shutdown_reaps_the_child_process() {
         isolate_home();
-        let invocation =
-            PiInvocation::channel(&fixture_pi_config(), "reap fixture", "telegram");
+        let invocation = PiInvocation::channel(&fixture_pi_config(), "reap fixture", "telegram");
         let mut session = Session::new(invocation);
         session.start().await.expect("start session");
 

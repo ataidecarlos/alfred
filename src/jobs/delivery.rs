@@ -261,8 +261,14 @@ mod tests {
         assert!(Delivery::wants_delivery(&always, &end(Some("NO_MATCH"))));
 
         let on_signal = job(ReportPolicy::OnSignal);
-        assert!(Delivery::wants_delivery(&on_signal, &end(Some(VERDICT_MATCH))));
-        assert!(!Delivery::wants_delivery(&on_signal, &end(Some("NO_MATCH"))));
+        assert!(Delivery::wants_delivery(
+            &on_signal,
+            &end(Some(VERDICT_MATCH))
+        ));
+        assert!(!Delivery::wants_delivery(
+            &on_signal,
+            &end(Some("NO_MATCH"))
+        ));
         assert!(!Delivery::wants_delivery(&on_signal, &end(None)));
     }
 
@@ -280,7 +286,12 @@ mod tests {
     #[test]
     fn an_empty_allowed_list_has_no_recipient() {
         let delivery = Delivery::new(Some("token".to_string()), &[]);
-        assert_eq!(delivery.resolve_chat(&job(ReportPolicy::Always)).expect("none"), None);
+        assert_eq!(
+            delivery
+                .resolve_chat(&job(ReportPolicy::Always))
+                .expect("none"),
+            None
+        );
     }
 
     #[test]

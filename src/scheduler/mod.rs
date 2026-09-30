@@ -258,11 +258,7 @@ pub async fn run_to_completion(
 
 /// Dispatch `job` in a child task so a panic is observed as a
 /// [`tokio::task::JoinError`] and recorded `failed` instead of propagating.
-async fn dispatch_catching_panics(
-    dispatch: &Arc<dyn Dispatch>,
-    job: &Job,
-    run_id: &str,
-) -> RunEnd {
+async fn dispatch_catching_panics(dispatch: &Arc<dyn Dispatch>, job: &Job, run_id: &str) -> RunEnd {
     let joined = tokio::spawn({
         let dispatch = Arc::clone(dispatch);
         let job = job.clone();

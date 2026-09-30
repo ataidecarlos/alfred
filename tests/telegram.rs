@@ -15,9 +15,7 @@ mod telegram {
     use serde_json::{json, Value};
     use tempfile::TempDir;
 
-    use alfred::connectors::telegram::{
-        MessageSender, Session, TelegramConnector, CHANNEL_NAME,
-    };
+    use alfred::connectors::telegram::{MessageSender, Session, TelegramConnector, CHANNEL_NAME};
     use alfred::error::AlfredError;
     use alfred::pi::PiInvocation;
     use alfred::server::AppState;
@@ -119,7 +117,10 @@ mod telegram {
             .await
             .unwrap();
 
-        assert_eq!(recorder.messages(), vec![(7, "reply to: hello".to_string())]);
+        assert_eq!(
+            recorder.messages(),
+            vec![(7, "reply to: hello".to_string())]
+        );
     }
 
     #[tokio::test]
@@ -169,8 +170,7 @@ mod telegram {
         // The Pi binary does not exist. If the connector tried to start a
         // session it would fail and report the failure to the chat, so an
         // empty recorder proves no Pi call was made.
-        let (connector, recorder, _dir) =
-            fixture(vec![42], "alfred-issue12-missing-pi-binary");
+        let (connector, recorder, _dir) = fixture(vec![42], "alfred-issue12-missing-pi-binary");
 
         connector
             .process_update(message(1, 99, 7, "hello"))
@@ -186,14 +186,20 @@ mod telegram {
 
     #[tokio::test]
     async fn a_failed_pi_session_is_reported_to_the_chat() {
-        let (connector, recorder, _dir) =
-            fixture(vec![42], "alfred-issue12-missing-pi-binary");
+        let (connector, recorder, _dir) = fixture(vec![42], "alfred-issue12-missing-pi-binary");
 
         let result = connector.process_update(message(1, 42, 7, "hello")).await;
-        assert!(result.is_err(), "a missing Pi binary must surface as an error");
+        assert!(
+            result.is_err(),
+            "a missing Pi binary must surface as an error"
+        );
 
         let sent = recorder.messages();
-        assert_eq!(sent.len(), 1, "the chat is told the session failed: {sent:?}");
+        assert_eq!(
+            sent.len(),
+            1,
+            "the chat is told the session failed: {sent:?}"
+        );
         assert_eq!(sent[0].0, 7);
         assert!(
             sent[0].1.contains("Pi session error"),
@@ -204,8 +210,7 @@ mod telegram {
 
     #[tokio::test]
     async fn remember_appends_to_the_memories_file_without_a_pi_call() {
-        let (connector, recorder, dir) =
-            fixture(vec![42], "alfred-issue12-missing-pi-binary");
+        let (connector, recorder, dir) = fixture(vec![42], "alfred-issue12-missing-pi-binary");
 
         connector
             .process_update(message(1, 42, 7, "/remember Buy milk"))
@@ -214,6 +219,9 @@ mod telegram {
 
         let content = std::fs::read_to_string(dir.path().join("memories.md")).unwrap();
         assert_eq!(content, "Buy milk\n");
-        assert_eq!(recorder.messages(), vec![(7, "Remembered: Buy milk".to_string())]);
+        assert_eq!(
+            recorder.messages(),
+            vec![(7, "Remembered: Buy milk".to_string())]
+        );
     }
 }

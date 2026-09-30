@@ -31,7 +31,9 @@ pub struct PromptLayers {
 
 /// Load the prompt layers from `config`, reading memories from
 /// [`Paths::memories_file`].
-pub fn load_prompt_layers(config: &crate::config::PromptConfig) -> Result<PromptLayers, AlfredError> {
+pub fn load_prompt_layers(
+    config: &crate::config::PromptConfig,
+) -> Result<PromptLayers, AlfredError> {
     load_prompt_layers_at(config, &Paths::memories_file())
 }
 
@@ -43,12 +45,16 @@ pub fn load_prompt_layers_at(
     config: &crate::config::PromptConfig,
     memories_path: &Path,
 ) -> Result<PromptLayers, AlfredError> {
-    let system = load_file(&config.system_prompt_file)
-        .unwrap_or_else(|_| DEFAULT_SYSTEM_PROMPT.to_string());
+    let system =
+        load_file(&config.system_prompt_file).unwrap_or_else(|_| DEFAULT_SYSTEM_PROMPT.to_string());
     let user = load_file(&config.user_prompt_file).unwrap_or_default();
     let memories = memory::read_memories_at(memories_path)?;
 
-    Ok(PromptLayers { system, user, memories })
+    Ok(PromptLayers {
+        system,
+        user,
+        memories,
+    })
 }
 
 /// Assemble the system prompt passed to Pi as `--system-prompt`.
@@ -97,7 +103,11 @@ mod tests {
 
     #[test]
     fn assemble_system_emits_sections_in_documented_order() {
-        let assembled = assemble_system(&layers("You are Alfred.", "Reply in Portuguese.", "Likes tea"));
+        let assembled = assemble_system(&layers(
+            "You are Alfred.",
+            "Reply in Portuguese.",
+            "Likes tea",
+        ));
         assert_eq!(
             assembled,
             "You are Alfred.\n\n## User Context\n\nReply in Portuguese.\n\n## User Memories\n\nLikes tea"
@@ -106,8 +116,14 @@ mod tests {
 
     #[test]
     fn assemble_system_omits_empty_sections() {
-        assert_eq!(assemble_system(&layers("system only", "", "")), "system only");
-        assert_eq!(assemble_system(&layers("", "user only", "")), "## User Context\n\nuser only");
+        assert_eq!(
+            assemble_system(&layers("system only", "", "")),
+            "system only"
+        );
+        assert_eq!(
+            assemble_system(&layers("", "user only", "")),
+            "## User Context\n\nuser only"
+        );
         assert_eq!(
             assemble_system(&layers("", "", "memory only")),
             "## User Memories\n\nmemory only"
@@ -141,11 +157,20 @@ mod tests {
     fn load_prompt_layers_falls_back_when_files_are_missing() {
         let dir = tempdir().unwrap();
         let config = PromptConfig {
-            system_prompt_file: dir.path().join("absent-system.md").to_string_lossy().into_owned(),
-            user_prompt_file: dir.path().join("absent-user.md").to_string_lossy().into_owned(),
+            system_prompt_file: dir
+                .path()
+                .join("absent-system.md")
+                .to_string_lossy()
+                .into_owned(),
+            user_prompt_file: dir
+                .path()
+                .join("absent-user.md")
+                .to_string_lossy()
+                .into_owned(),
         };
 
-        let loaded = load_prompt_layers_at(&config, &dir.path().join("absent-memories.md")).unwrap();
+        let loaded =
+            load_prompt_layers_at(&config, &dir.path().join("absent-memories.md")).unwrap();
         assert_eq!(loaded.system, DEFAULT_SYSTEM_PROMPT);
         assert!(loaded.user.is_empty());
         assert!(loaded.memories.is_empty());

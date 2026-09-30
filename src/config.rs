@@ -103,30 +103,59 @@ pub struct WebhookConfig {
     pub allowed_hosts: Vec<String>,
 }
 
-fn default_port() -> u16 { 8080 }
-fn default_host() -> String { "127.0.0.1".into() }
+fn default_port() -> u16 {
+    8080
+}
+fn default_host() -> String {
+    "127.0.0.1".into()
+}
 fn default_system_prompt_path() -> String {
     Paths::system_prompt_file().to_string_lossy().to_string()
 }
 fn default_user_prompt_path() -> String {
     Paths::user_prompt_file().to_string_lossy().to_string()
 }
-fn default_true() -> bool { true }
-
-fn default_pi_binary() -> String { "pi".into() }
-fn default_pi_api_key_env() -> String { "PI_API_KEY".into() }
-fn default_pi_thinking() -> String { "off".into() }
-fn default_pi_timeout_secs() -> u64 { 900 }
-fn default_idle_compact_secs() -> u64 { 43_200 }
-fn default_compact_token_threshold() -> u64 { 60_000 }
-fn default_pi_session_dir() -> String {
-    Paths::pi_dir().join("sessions").to_string_lossy().to_string()
+fn default_true() -> bool {
+    true
 }
 
-fn default_max_concurrent() -> usize { 2 }
-fn default_min_watch_interval_secs() -> u64 { 900 }
-fn default_max_runs_per_job() -> usize { 100 }
-fn default_missing_verdict() -> String { "notify".into() }
+fn default_pi_binary() -> String {
+    "pi".into()
+}
+fn default_pi_api_key_env() -> String {
+    "PI_API_KEY".into()
+}
+fn default_pi_thinking() -> String {
+    "off".into()
+}
+fn default_pi_timeout_secs() -> u64 {
+    900
+}
+fn default_idle_compact_secs() -> u64 {
+    43_200
+}
+fn default_compact_token_threshold() -> u64 {
+    60_000
+}
+fn default_pi_session_dir() -> String {
+    Paths::pi_dir()
+        .join("sessions")
+        .to_string_lossy()
+        .to_string()
+}
+
+fn default_max_concurrent() -> usize {
+    2
+}
+fn default_min_watch_interval_secs() -> u64 {
+    900
+}
+fn default_max_runs_per_job() -> usize {
+    100
+}
+fn default_missing_verdict() -> String {
+    "notify".into()
+}
 
 impl Default for PiConfig {
     fn default() -> Self {
@@ -236,7 +265,10 @@ mod tests {
     #[test]
     fn compaction_defaults_match_the_specified_policy() {
         let pi = PiConfig::default();
-        assert_eq!(pi.idle_compact_secs, 43_200, "idle default must be 12 hours");
+        assert_eq!(
+            pi.idle_compact_secs, 43_200,
+            "idle default must be 12 hours"
+        );
         assert_eq!(pi.compact_token_threshold, 60_000);
     }
 
@@ -246,9 +278,12 @@ mod tests {
         let config = load_config(&path).expect("bundled example config should parse");
         assert_eq!(config.server.host, "127.0.0.1");
         assert_eq!(config.server.api_key, None);
-        assert_eq!(config.pi.binary, "pi");        // The example is what a first run copies into place, so its compaction
-        // settings must match the documented policy: a 12-hour idle default.
-        assert_eq!(config.pi.idle_compact_secs, 43_200, "the example must not shorten the 12h idle default");
+        assert_eq!(config.pi.binary, "pi"); // The example is what a first run copies into place, so its compaction
+                                            // settings must match the documented policy: a 12-hour idle default.
+        assert_eq!(
+            config.pi.idle_compact_secs, 43_200,
+            "the example must not shorten the 12h idle default"
+        );
         assert_eq!(config.pi.compact_token_threshold, 60_000);
         assert!(config.jobs.enabled);
         // An unconfigured webhook allow-list denies every host.
@@ -295,9 +330,12 @@ mod tests {
         )
         .unwrap();
         let config = load_config(&path).unwrap();
-        assert_eq!(config.pi.binary, "pi");        // The example is what a first run copies into place, so its compaction
-        // settings must match the documented policy: a 12-hour idle default.
-        assert_eq!(config.pi.idle_compact_secs, 43_200, "the example must not shorten the 12h idle default");
+        assert_eq!(config.pi.binary, "pi"); // The example is what a first run copies into place, so its compaction
+                                            // settings must match the documented policy: a 12-hour idle default.
+        assert_eq!(
+            config.pi.idle_compact_secs, 43_200,
+            "the example must not shorten the 12h idle default"
+        );
         assert_eq!(config.pi.compact_token_threshold, 60_000);
         assert_eq!(config.jobs.min_watch_interval_secs, 900);
         assert_eq!(config.jobs.missing_verdict, "notify");

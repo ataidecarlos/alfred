@@ -93,7 +93,9 @@ mod release_matrix {
             let Some(rest) = line.trim().strip_prefix("$AlfredPlatform") else {
                 continue;
             };
-            let Some(start) = rest.find('"') else { continue };
+            let Some(start) = rest.find('"') else {
+                continue;
+            };
             let Some(end) = rest[start + 1..].find('"') else {
                 continue;
             };

@@ -11,7 +11,9 @@ mod session_supervisor {
     use std::path::PathBuf;
     use std::time::{Duration, Instant};
 
-    use alfred::pi::{CompactPolicy, PiInvocation, Session, SessionSupervisor, TickOutcome, COMPACT_TICK};
+    use alfred::pi::{
+        CompactPolicy, PiInvocation, Session, SessionSupervisor, TickOutcome, COMPACT_TICK,
+    };
 
     /// A Pi invocation that targets the compiled `fake-pi` double and keeps all
     /// paths inside the test process.
@@ -78,7 +80,10 @@ mod session_supervisor {
 
         assert_eq!(outcome, TickOutcome::Compacted { tokens: 15 });
         assert!(session.is_alive());
-        assert_eq!(session.send("after compact").await.unwrap(), "reply to: after compact");
+        assert_eq!(
+            session.send("after compact").await.unwrap(),
+            "reply to: after compact"
+        );
     }
 
     #[tokio::test]
@@ -90,6 +95,9 @@ mod session_supervisor {
             .tick(Instant::now())
             .await;
 
-        assert!(matches!(outcome, TickOutcome::NotDue { .. }), "got {outcome:?}");
+        assert!(
+            matches!(outcome, TickOutcome::NotDue { .. }),
+            "got {outcome:?}"
+        );
     }
 }

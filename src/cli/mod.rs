@@ -628,11 +628,7 @@ fn write_job_detail(out: &mut dyn Write, job: &Job) -> Result<(), AlfredError> {
 fn write_run_outcome(out: &mut dyn Write, run: &JobRun) -> Result<(), AlfredError> {
     writeln!(out, "run:        {}", run.id)?;
     writeln!(out, "status:     {}", run.status)?;
-    writeln!(
-        out,
-        "verdict:    {}",
-        run.verdict.as_deref().unwrap_or("-")
-    )?;
+    writeln!(out, "verdict:    {}", run.verdict.as_deref().unwrap_or("-"))?;
     writeln!(
         out,
         "delivered:  {}",
@@ -698,7 +694,14 @@ mod tests {
         dispatch: &Arc<dyn Dispatch>,
     ) -> Result<String, AlfredError> {
         let mut buffer = Vec::new();
-        run_job(command, store, &JobsConfig::default(), dispatch, &mut buffer).await?;
+        run_job(
+            command,
+            store,
+            &JobsConfig::default(),
+            dispatch,
+            &mut buffer,
+        )
+        .await?;
         String::from_utf8(buffer).map_err(|error| AlfredError::JobValidation(error.to_string()))
     }
 

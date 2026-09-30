@@ -123,7 +123,10 @@ impl JobRunner {
     /// Build a runner from the `[pi]` config and the `[jobs].missing_verdict`
     /// fallback.
     pub fn new(pi: PiConfig, missing_verdict: MissingVerdict) -> Self {
-        Self { pi, missing_verdict }
+        Self {
+            pi,
+            missing_verdict,
+        }
     }
 
     /// The `[pi]` config this runner holds.
@@ -252,7 +255,11 @@ impl JobRunner {
     }
 
     /// Assemble the outcome of a Pi attempt into a terminal [`RunEnd`].
-    fn finish(&self, job: &Job, run: Result<PiAttempt, AlfredError>) -> Result<RunEnd, AlfredError> {
+    fn finish(
+        &self,
+        job: &Job,
+        run: Result<PiAttempt, AlfredError>,
+    ) -> Result<RunEnd, AlfredError> {
         match run {
             Ok(attempt) if attempt.timed_out => Ok(self.timeout_end(&attempt)),
             Ok(attempt) => match attempt.exit.success() {
@@ -269,7 +276,12 @@ impl JobRunner {
         job: &Job,
         attempt: PiAttempt,
     ) -> Result<RunEnd, AlfredError> {
-        let PiAttempt { output, stats, exit, .. } = attempt;
+        let PiAttempt {
+            output,
+            stats,
+            exit,
+            ..
+        } = attempt;
         let output = match output {
             Some(text) if !text.trim().is_empty() => text,
             _ => {
@@ -305,10 +317,7 @@ impl JobRunner {
 
     fn timeout_end(&self, attempt: &PiAttempt) -> RunEnd {
         let mut end = RunEnd::new(STATUS_TIMEOUT);
-        end.error = Some(format!(
-            "Pi run exceeded {} seconds",
-            attempt.timeout_secs
-        ));
+        end.error = Some(format!("Pi run exceeded {} seconds", attempt.timeout_secs));
         apply_stats(&mut end, attempt);
         end
     }
@@ -383,7 +392,9 @@ impl JobRunner {
         if !accepted.success {
             return Err(AlfredError::Pi(format!(
                 "Pi rejected the prompt: {}",
-                accepted.error.unwrap_or_else(|| "unknown error".to_string())
+                accepted
+                    .error
+                    .unwrap_or_else(|| "unknown error".to_string())
             )));
         }
 
@@ -446,8 +457,12 @@ impl JobRunner {
         let data = response.data?;
         let tokens = data.get("tokens");
         Some(PiStats {
-            input: tokens.and_then(|tokens| tokens.get("input")).and_then(Value::as_i64),
-            output: tokens.and_then(|tokens| tokens.get("output")).and_then(Value::as_i64),
+            input: tokens
+                .and_then(|tokens| tokens.get("input"))
+                .and_then(Value::as_i64),
+            output: tokens
+                .and_then(|tokens| tokens.get("output"))
+                .and_then(Value::as_i64),
             cost: data.get("cost").and_then(Value::as_f64),
         })
     }
@@ -518,7 +533,11 @@ impl From<PiCompletion> for PiAttempt {
         let (input, output, cost) = completion.stats;
         Self {
             output: completion.output,
-            stats: Some(PiStats { input, output, cost }),
+            stats: Some(PiStats {
+                input,
+                output,
+                cost,
+            }),
             exit: match completion.exit_code {
                 Some(0) => ExitStatus::Success,
                 Some(code) => ExitStatus::Code(code.to_string()),
