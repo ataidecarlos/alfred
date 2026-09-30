@@ -1,0 +1,38 @@
+# Store all text as LF and check it out as LF on every platform.
+#
+# Without this, a Windows checkout with core.autocrlf=true materialises CRLF in
+# the working tree. That breaks scripts/install.sh outright (a CR in
+# "#!/bin/bash" / "set -e" makes bash fail at line 2) and makes the working
+# tree disagree with the committed blobs. Pinning LF keeps Windows, Linux and
+# CI byte-identical.
+#
+# No binary files are tracked in this repository, so every pattern below is
+# text. The list is explicit rather than a blanket "* text=auto" so that a
+# binary added later cannot be silently mangled.
+
+# Rust: rustfmt writes LF and `cargo fmt --check` must agree.
+*.rs       text eol=lf
+
+# Shell: a CR in the shebang or in `set -e` aborts the script.
+*.sh       text eol=lf
+
+# Other text formats committed here; LF is portable and keeps the tree uniform.
+*.md       text eol=lf
+*.yml      text eol=lf
+*.yaml     text eol=lf
+*.toml     text eol=lf
+*.lock     text eol=lf
+*.jsonc    text eol=lf
+*.example  text eol=lf
+
+# Extension-less text files.
+.gitignore      text eol=lf
+.gitattributes  text eol=lf
+.dockerignore   text eol=lf
+Dockerfile      text eol=lf
+LICENSE         text eol=lf
+
+# Deliberately NOT pinned: *.ps1. scripts/install.ps1 and scripts/update.ps1
+# declare "#Requires -Version 5.1", and CRLF is the safe convention for
+# Windows PowerShell; they are never run from a Unix checkout. core.autocrlf
+# keeps them CRLF on Windows, which is what we want.
