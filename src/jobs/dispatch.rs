@@ -17,9 +17,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
+use crate::config::{JobsConfig, PiConfig, TelegramConfig};
 use crate::error::AlfredError;
 use crate::jobs::delivery::Delivery;
-use crate::jobs::runner::JobRunner;
+use crate::jobs::runner::{JobRunner, MissingVerdict};
 use crate::jobs::{Job, RunEnd};
 use crate::scheduler::Dispatch;
 use crate::store::Store;
@@ -39,6 +40,33 @@ impl JobDispatch {
             runner,
             delivery,
         }
+    }
+
+    /// Compose the dispatcher from the loaded `[pi]`, `[jobs]`, and `[telegram]`
+    /// configuration.
+    ///
+    /// This is the single place the scheduler and the manual-run entry points
+    /// build their dispatcher, so a manual run and a scheduled run always use
+    /// the same runner, verdict fallback, token, and recipient fallback.
+    pub fn from_config(
+        store: Arc<Store>,
+        pi: &PiConfig,
+        jobs: &JobsConfig,
+        telegram: Option<&TelegramConfig>,
+    ) -> Self {
+        let runner = Arc::new(JobRunner::new(
+            pi.clone(),
+            MissingVerdict::parse(&jobs.missing_verdict),
+        ));
+        let token = telegram.and_then(|telegram| telegram.bot_token.clone());
+        let allowed_users: &[u64] = telegram
+            .map(|telegram| telegram.allowed_users.as_slice())
+            .unwrap_or(&[]);
+        let delivery = Arc::new(match store.telegram_sender_override() {
+            Some(sender) => Delivery::new(token, allowed_users).with_sender(sender),
+            None => Delivery::new(token, allowed_users),
+        });
+        Self::new(store, runner, delivery)
     }
 }
 

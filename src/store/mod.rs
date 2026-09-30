@@ -1,12 +1,13 @@
 use std::path::Path;
 use std::str::FromStr;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use chrono::Utc;
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::connectors::telegram::MessageSender;
 use crate::error::AlfredError;
 use crate::jobs::{self, Job, JobKind, JobRun, NewJob, ReportPolicy, RunEnd};
 
@@ -87,6 +88,15 @@ pub struct Todo {
 
 pub struct Store {
     conn: Mutex<Connection>,
+    /// Process-wide override for the Telegram transport used by delivery.
+    ///
+    /// The REST manual-run handler builds its dispatcher from
+    /// [`crate::server::AppState`], which has no place to inject a transport.
+    /// The store already reaches every delivery path, so it carries the
+    /// override; production leaves it [`None`] and delivery uses the real Bot
+    /// API sender from `[telegram].bot_token`. Tests set a recorder here so no
+    /// request leaves the process.
+    telegram_sender: Option<Arc<dyn MessageSender>>,
 }
 
 impl Store {
@@ -148,7 +158,28 @@ impl Store {
             DROP TABLE IF EXISTS messages;
             DROP TABLE IF EXISTS memories;"
         )?;
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+            telegram_sender: None,
+        })
+    }
+
+    /// Use `sender` for every delivery this store's dispatchers perform.
+    ///
+    /// The store holds the override because the manual-run handlers build
+    /// their delivery from state that has no transport slot; this is the single
+    /// seam tests use to keep delivery off the network. Production never calls
+    /// it.
+    pub fn with_telegram_sender_override(self, sender: Option<Arc<dyn MessageSender>>) -> Self {
+        Self {
+            telegram_sender: sender,
+            ..self
+        }
+    }
+
+    /// The injected Telegram transport, when one was set.
+    pub fn telegram_sender_override(&self) -> Option<Arc<dyn MessageSender>> {
+        self.telegram_sender.clone()
     }
 
     pub fn add_todo(&self, title: &str, description: &str, priority: &str, due_date: &str) -> Result<String, AlfredError> {
@@ -446,6 +477,19 @@ impl Store {
             return Err(AlfredError::JobValidation(format!("run not found: {run_id}")));
         }
         Ok(())
+    }
+
+    /// A single run by id, including the `delivered` flag.
+    pub fn get_run(&self, run_id: &str) -> Result<JobRun, AlfredError> {
+        let conn = self.db()?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {RUN_COLUMNS} FROM job_runs WHERE id=?1"
+        ))?;
+        let mut rows = stmt.query_map(params![run_id], job_run_from_row)?;
+        match rows.next() {
+            Some(run) => Ok(run?),
+            None => Err(AlfredError::JobValidation(format!("run not found: {run_id}"))),
+        }
     }
 
     /// The most recent runs of a job, newest first.

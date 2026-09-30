@@ -15,9 +15,7 @@ use cli::Cli;
 use config::load_config;
 use connectors::Connector;
 use connectors::telegram::{shutdown_sessions, Session, TelegramConnector};
-use jobs::delivery::Delivery;
 use jobs::dispatch::JobDispatch;
-use jobs::runner::{JobRunner, MissingVerdict};
 use paths::Paths;
 use scheduler::{Scheduler, SchedulerConfig, SystemClock};
 use server::{start_server, AppState};
@@ -208,21 +206,12 @@ async fn run_server_mode(config_path: &Option<String>) {
     // Scheduler: run due jobs through Pi and deliver their results. A Telegram
     // failure never stops this loop; a delivery failure is recorded on the run.
     if config.jobs.enabled {
-        let runner = Arc::new(JobRunner::new(
-            config.pi.clone(),
-            MissingVerdict::parse(&config.jobs.missing_verdict),
+        let dispatch = Arc::new(JobDispatch::from_config(
+            Arc::clone(&state.store),
+            &config.pi,
+            &config.jobs,
+            config.telegram.as_ref(),
         ));
-        let token = config
-            .telegram
-            .as_ref()
-            .and_then(|telegram| telegram.bot_token.clone());
-        let allowed_users: &[u64] = config
-            .telegram
-            .as_ref()
-            .map(|telegram| telegram.allowed_users.as_slice())
-            .unwrap_or(&[]);
-        let delivery = Arc::new(Delivery::new(token, allowed_users));
-        let dispatch = Arc::new(JobDispatch::new(Arc::clone(&state.store), runner, delivery));
         let scheduler = Arc::new(Scheduler::new(
             Arc::clone(&state.store),
             Arc::new(SystemClock),

@@ -26,7 +26,7 @@ use tokio::sync::Semaphore;
 
 use crate::config::JobsConfig;
 use crate::error::AlfredError;
-use crate::jobs::{self, Job, JobKind, RunEnd};
+use crate::jobs::{self, Job, JobKind, JobRun, RunEnd};
 use crate::store::Store;
 
 /// How often the loop polls for due jobs.
@@ -228,42 +228,49 @@ impl Scheduler {
     }
 }
 
-/// Run one job while holding a semaphore permit, then persist and prune.
+/// Run one job to completion and persist its run row exactly as the loop does.
 ///
-/// The dispatch itself runs in a child task so a panic is observed as a
-/// [`tokio::task::JoinError`] and recorded `failed` instead of unwinding the
-/// scheduler.
-async fn run_one(
-    store: Arc<Store>,
-    dispatch: Arc<dyn Dispatch>,
-    permits: Arc<Semaphore>,
+/// This is the whole per-run lifecycle in one place: open the row `running`,
+/// dispatch (turning a dispatch error or panic into a `failed` end, never
+/// unwinding), close the row with the terminal fields, deliver through
+/// [`Dispatch::after_run`], then prune history. The scheduled loop
+/// ([`Scheduler::tick`]) and the manual-run entry points both call it, so a
+/// manual run and a scheduled run record the same row and deliver the same way.
+///
+/// Returns the closed run row, including the `delivered` flag that
+/// [`Dispatch::after_run`] sets.
+pub async fn run_to_completion(
+    store: &Arc<Store>,
+    dispatch: &Arc<dyn Dispatch>,
     max_runs_per_job: usize,
-    job: Job,
-) {
-    let permit = match permits.acquire_owned().await {
-        Ok(permit) => permit,
-        Err(error) => {
-            tracing::error!(job = %job.name, %error, "scheduler semaphore closed");
-            return;
-        }
-    };
+    job: &Job,
+) -> Result<JobRun, AlfredError> {
+    let run_id = store.record_run_start(&job.id)?;
+    let end = dispatch_catching_panics(dispatch, job, &run_id).await;
+    store.record_run_end(&run_id, &end)?;
+    dispatch.after_run(&run_id, job, &end).await;
+    let run = store.get_run(&run_id)?;
+    if let Err(error) = store.prune_runs(&job.id, max_runs_per_job) {
+        tracing::error!(job = %job.name, %error, "failed to prune run history");
+    }
+    Ok(run)
+}
 
-    let run_id = match store.record_run_start(&job.id) {
-        Ok(run_id) => run_id,
-        Err(error) => {
-            tracing::error!(job = %job.name, %error, "failed to open run row");
-            return;
-        }
-    };
-
+/// Dispatch `job` in a child task so a panic is observed as a
+/// [`tokio::task::JoinError`] and recorded `failed` instead of propagating.
+async fn dispatch_catching_panics(
+    dispatch: &Arc<dyn Dispatch>,
+    job: &Job,
+    run_id: &str,
+) -> RunEnd {
     let joined = tokio::spawn({
-        let dispatch = Arc::clone(&dispatch);
+        let dispatch = Arc::clone(dispatch);
         let job = job.clone();
         async move { dispatch.dispatch(&job).await }
     })
     .await;
 
-    let end = match joined {
+    match joined {
         Ok(Ok(end)) => end,
         Ok(Err(error)) => {
             tracing::error!(job = %job.name, %run_id, %error, "job dispatch failed");
@@ -281,16 +288,27 @@ async fn run_one(
             });
             end
         }
+    }
+}
+
+/// Run one job while holding a semaphore permit, then persist and prune.
+async fn run_one(
+    store: Arc<Store>,
+    dispatch: Arc<dyn Dispatch>,
+    permits: Arc<Semaphore>,
+    max_runs_per_job: usize,
+    job: Job,
+) {
+    let permit = match permits.acquire_owned().await {
+        Ok(permit) => permit,
+        Err(error) => {
+            tracing::error!(job = %job.name, %error, "scheduler semaphore closed");
+            return;
+        }
     };
 
-    match store.record_run_end(&run_id, &end) {
-        Ok(()) => dispatch.after_run(&run_id, &job, &end).await,
-        Err(error) => {
-            tracing::error!(job = %job.name, %run_id, %error, "failed to close run row");
-        }
-    }
-    if let Err(error) = store.prune_runs(&job.id, max_runs_per_job) {
-        tracing::error!(job = %job.name, %error, "failed to prune run history");
+    if let Err(error) = run_to_completion(&store, &dispatch, max_runs_per_job, &job).await {
+        tracing::error!(job = %job.name, %error, "failed to run job");
     }
 
     drop(permit);
