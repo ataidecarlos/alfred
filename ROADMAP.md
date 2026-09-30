@@ -60,19 +60,15 @@ the dispatcher being the only merge point.
 
 Deferred, partially verified. The installer was executed in WSL and passes; the
 no-op second run is proven. The remaining gap is a proven successful *first*
-install, which is blocked by the linux-arm64 item below.
-
-### linux-arm64
-
-Deferred (issue #53). `scripts/install.sh` advertises `linux-arm64`, but the
-release workflow's build matrix has no `aarch64-unknown-linux-gnu` target, so a
-`linux-arm64` archive is never built or published.
+install, which needs a release tagged from the rewrite: the published releases are
+still the previous product (see README).
 
 ### Manual job runs
 
-Deferred. `alfred job run <id>` and `POST /api/jobs/{id}/run` still report that
-the manual-run path is unavailable, even though the Pi-backed runner and the
-scheduler shipped. A manual-run entry point should dispatch the same runner.
+Deferred (issue #59). `alfred job run <id>` and `POST /api/jobs/{id}/run` still
+report that the manual-run path is unavailable, even though the Pi-backed runner
+and the scheduler shipped. A manual-run entry point should dispatch the same
+runner.
 
 ## Removed (non-goals)
 
@@ -95,3 +91,5 @@ Removed in the rewrite to the Pi-host; do not reintroduce these (see
   SQLite scheduler, the Pi-backed runner with verdict handling, delivery to
   Telegram, the REST surface, file-backed memories, generated Pi skills, and
   config hot-reload.
+- `linux-arm64` release artifacts (#53), and a `cargo test` guard asserting the
+  installer's advertised platforms and the release matrix stay in agreement.
