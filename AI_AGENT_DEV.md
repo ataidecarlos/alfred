@@ -26,8 +26,9 @@ unit has a command that proves it works. **It is overkill** when:
 | All units touch the same files | One issue; the graph buys nothing. |
 | A spike or exploration | Timebox it; only write issues for decided work. |
 
-The Alfred rewrite used 19 issues (one gate, 18 work items) because the deletions were not
-independently mergeable; a one-file change does not need nineteen issues.
+The Alfred rewrite used 26 issues — one gate and 25 work items, eighteen planned up front and the
+rest filed mid-run from defects workers found — because the deletions were not independently
+mergeable; a one-file change does not need twenty-six issues.
 
 ## 2. Roles
 
@@ -39,6 +40,15 @@ independently mergeable; a one-file change does not need nineteen issues.
 The separation is what makes verification meaningful. A worker that builds and verifies grades
 its own homework: it reports "done" with no independent check. Because the overseer never wrote
 the code, its re-run is genuinely independent. Workers are leaves; they do not spawn.
+
+**That independence has a limit worth naming.** The overseer did not write the code, so its re-run
+is independent of the *implementation*. It did write the spec — and in the Alfred run **every**
+defect found after dispatch was in the spec rather than the code: an acceptance command that could
+not run, stale baselines, a cross-reference to the wrong issue, a field listed without its required
+value. A worker that faithfully implements a wrong spec produces a passing verification of the
+wrong thing, and the overseer is the last person likely to notice. For anything irreversible,
+security-adjacent, or derived from a plan rather than from the code, get a second reader who sees
+only the issue text and the repository, never the author's reasoning.
 
 ## 3. Step 0 — the capability and credential gate
 
@@ -96,7 +106,7 @@ dispatchable by any worker.
 | 6 | `## Error handling` | Named failure paths and how each is recorded. |
 | 7 | `## Notes` / `## Constraints` / `## Reference` | Scope guards, deliberate stubs, contract documents. |
 
-Abridged real example (issue #5):
+Abridged real example (from issue #5; the Pi double is a compiled binary today):
 
 ```markdown
 **Blocked by:** #4
@@ -105,7 +115,7 @@ Add the Pi subprocess boundary, and the test fixture that lets every later issue
 validated without an API key.
 ## Files
 - src/pi/mod.rs, src/pi/client.rs, src/pi/invocation.rs
-- tests/fixtures/fake-pi.sh, tests/pi_rpc.rs
+- src/bin/fake-pi.rs (the compiled test double), tests/pi_rpc.rs
 ## Acceptance
     cargo test pi_rpc
 Expected: green, including a framing case with an embedded U+2028 in a JSON string.
@@ -123,6 +133,36 @@ fails, because cargo accepts a single `TESTNAME` positional and multiple libtest
 follow `--`. Validate every new acceptance at authoring time, and fix the issue text rather than
 letting a worker improvise a passing substitute.
 
+### 5.1 Before you dispatch: check the spec
+
+The spec is the highest-risk artifact in the process, and the overseer is its only author. In the
+Alfred run, eight defects were found after dispatch and **all eight were in the issue text**:
+
+- An acceptance command that could not execute (`cargo test memory prompt`).
+- A cross-reference to the wrong issue (`#4` where the assembly work was `#6`).
+- Two issues told to keep an endpoint that a later issue had deleted.
+- A baseline copied from an earlier brief rather than computed (34 quoted, 47 real) — twice.
+- A behaviour field named **without its required value**, so the worker chose one: a five-minute
+  compaction default where the requirement was twelve hours.
+- An assumption written as fact (that the test binary ships in release artifacts — it does not).
+- A diagnosis written as fact (that CRLF caused the `cargo fmt` failures — it did not).
+- An acceptance whose only "command" was a shell comment with nothing to run.
+
+Run this checklist on every issue before dispatch:
+
+| Check | How |
+|---|---|
+| Does the acceptance execute? | Run it once, now, on the branch you are cutting. |
+| Is the baseline right? | Compute it from that branch. Never copy it between briefs. |
+| Do the referenced paths and endpoints exist? | `rg` every path in `## Files` and every route in `## Acceptance`. |
+| Are the *values* stated, not only the fields? | A field named without its default or required value is a decision you have delegated by accident. |
+| Does every `#n` resolve to the issue you mean? | Renumbering between a plan and the ledger is the usual cause. |
+| Is any sentence an assumption rather than a measurement? | Measure it or mark it. "This ships in the artifact" is a measurement. |
+| Is there a command, or only prose? | Bullet acceptances are acceptable only when the command is unambiguous, such as `cargo test`. |
+
+Fixing a spec costs minutes. Discovering it at issue 14 costs a dispatch, a re-verification, and
+sometimes every issue built on top of it.
+
 ## 6. The dependency graph
 
 - `Blocked by:` text is the source of truth. GitHub's native dependency fields are optional;
@@ -139,7 +179,21 @@ letting a worker improvise a passing substitute.
 - **When no split is mergeable, make it one issue.** Alfred's prune was a single issue on
   purpose: deleting `src/llm/` broke `config_watch.rs`, `main.rs` and `server/mod.rs`, and no
   intermediate state compiled, so parallel branches could not merge in any order.
-- **State the critical path** as the longest chain of `Blocked by:` edges (`#3 → #4 → #7 → #8 → #11 → #13 → #16 → #17`, the longest chain in that run). It determines the finish and shows where an extra agent would not help. By #11, #5, #6 and #8 are closed, so it can test what it just built.
+- **State the critical path** as the longest chain of `Blocked by:` edges (`#3 → #4 → #7 → #8 → #11 → #13 → #16 → #17`, the longest chain in that run). It determines the finish and shows where an extra agent would not help. By the time #11 runs, #5, #6 and #8 are closed, so it can test what it just built.
+- **Find the hub files first.** A handful of files are touched by nearly everything —
+  `main.rs`, `config.rs`, `server/mod.rs` in this project. They, not the graph's width, set the
+  real concurrency ceiling and produce a serial tail: four of the last five issues had to run
+  alone because they all edited `main.rs`. Identify them at planning time, not at the fourth
+  conflict.
+- **Evidence goes stale on a long run.** #40's reachability evidence was gathered several issues
+  earlier, by which time five modules had been added, so the worker had to re-measure before
+  deleting anything. Re-verify an issue's evidence and recompute its baseline before dispatch,
+  especially when many issues have closed in between.
+- **Amending the graph mid-run is part of the job.** Re-blocking an issue on a newly found
+  prerequisite, splitting one out, or re-scoping one is normal overseer work. #11 and #12 were
+  re-blocked on a cross-platform test double only after #10 revealed that their fixture-driven
+  acceptances were being silently *skipped*; four downstream issues and a test suite depended on
+  catching that. The cost of skipping the amendment is a worker building against a false premise.
 
 ## 7. The dispatch protocol
 
@@ -162,6 +216,58 @@ summarise the failure away.
 in the closing comment as an accepted cascade decision, and confirms a later issue covers the
 gap. #4 lists three: the scheduler module became a placeholder (#8), memory routes were removed
 (#6, #10), and the Telegram connector kept only its non-agent-loop path (#12).
+
+### 7.1 Verification is adversarial, not mechanical
+
+Re-running the acceptance is necessary and not sufficient. There are four ways for it to pass
+while proving nothing:
+
+- **`ignored` is a tell.** Four issues had fixture-driven acceptances that were silently *skipped*
+  on the host, so the command "passed" having exercised nothing. Treat `0 ignored` as part of the
+  gate, exactly like `0 failed`. A count that changes unexpectedly is information.
+- **The acceptance can miss the risk entirely.** #4 had no server test, so no acceptance could
+  have caught a broken boot; the overseer added one and booted the server.
+- **Prefer an acceptance that fails when the change is reverted.** The strongest verifications in
+  this run were *negative probes*: deleting the new matrix entry made the installer/matrix guard
+  fail with exactly the message it promises, and planting a decoy binary made the packaging guard
+  fail. A check whose failure you have never observed is not yet a check.
+- **Hermetic, or it is not repeatable.** Until `ALFRED_DATA_DIR` existed, every CLI acceptance
+  wrote to the developer's real database and workers cleaned up by hand. An acceptance that
+  mutates real state cannot be safely re-run — which is precisely what the overseer must do.
+
+So: ask **"what would this acceptance not catch?"** and add the missing check. Then **read the
+critical logic** rather than inferring it from green tests. The cron field order, the verdict
+regex, the delivery policy, the installer's idempotency guard and the database-path precedence
+were each read line by line here, and each was a place a passing test would not have been enough.
+
+**Re-run after any rebase.** A branch that was green before being rebased has not been tested in
+its merged form, and a clean rebase is not evidence that behaviour survived it.
+
+### 7.2 The overseer's own operations are part of the system
+
+The overseer's tooling fails too. From this run: removing a worktree while the shell's cwd was
+inside it; a missing quote that silently no-opped an entire verification script; a guard that
+matched the wrong text and reported "already done"; and a check run in one worktree that was read
+as applying to another.
+
+- **Print the tree and the revision with every check.** A result without its context is not a result.
+- **Make the merge a scripted gate, not a judgement:** proceed only if the build is clean,
+  `failed == 0`, `ignored == 0`, and the diff is confined to the issue's declared files. The scope
+  check is what catches a worker quietly editing outside its `## Files`.
+- **Never run git in a worktree an agent owns.** Use `-C <path>` deliberately, or finish your own
+  operations before dispatching the next worker.
+- **When a check contradicts the worker, suspect the check first.** Twice here the worker was right
+  and the verification was wrong.
+
+### 7.3 Discovered-but-unowned work is an output, not noise
+
+A worker that finds an adjacent defect must **report it and leave it alone** — `AGENTS.md` already
+forbids the fix. The overseer's half of that rule is to *file it*. This run's workers surfaced a
+path mismatch that would silently have stopped every generated skill from loading, a checksum
+verification that had never verified anything, an unwired manual-run path, a config example
+overriding a corrected default, a missing release artifact, 270 lines of dead code, and two extra
+`AppState` constructors. Seven follow-up issues exist only because of that loop. Discarding those
+reports "to keep the diff scoped" throws away the cheapest defect discovery in the process.
 
 ## 8. The rules file (`AGENTS.md`)
 
@@ -224,6 +330,10 @@ Step 0 records this as evidence: the PAT was removed from `.git/config`, rotated
 | **Scope creep inside a worker** | `## Constraints` plus `AGENTS.md` ("keep the diff scoped; do not refactor neighbours"). A forced deviation is flagged and reviewed, not hidden. |
 | **Stale inline cross-references** | Keep the authoritative pointer on `Blocked by:`; treat prose `(#n)` as hints. |
 | **A blocker ships a different interface** | Update the dependent issue before dispatch. |
+| **A spec error masquerades as a code error.** | Every defect found in the Alfred run was in the issue text, not the code. Run the §5.1 checklist before dispatch and read the acceptance as a stranger would. |
+| **Discovered-but-unowned work is dropped.** | The worker reports it and leaves it alone; the overseer files it as an issue. Both halves are required, or the finding dies in a closing comment. |
+| **Evidence and baselines go stale over a long run.** | Re-measure before dispatch, not after. #40's reachability evidence predated five new modules; two baselines were copied rather than computed. |
+| **An acceptance is non-hermetic.** | A command that mutates the developer's real state cannot be re-run. Give the project an override (a data directory, a temp home) before the first CLI acceptance depends on it. |
 
 ## 11. Pacing
 
@@ -239,7 +349,27 @@ blockers; the graph's width is the ceiling.
 
 If you batch, batch within a phase (Alfred's milestones A–E), not across phases, and still re-run every acceptance command at the boundary.
 
-## 12. Adoption checklist for a new project
+## 12. Closure is not verification
+
+An empty issue list does not mean the project works. The Alfred run closed 26 of 26 issues and
+still had four asks that **could not be executed in that environment**: building the Docker image
+(no Docker on the host), a successful first install (no release tagged since the rewrite), a real
+Telegram send (no bot token), and a real CI run (no tag push). Each was stated honestly at the
+issue level and was invisible at the project level.
+
+Keep two registers, and separate them in the final report:
+
+| Register | Meaning |
+|---|---|
+| **Verified by execution** | A command ran, against a named revision, and its output is recorded. |
+| **Unverifiable here** | No command exists in this environment. Name the environment that could verify it, and the exact command. |
+
+The per-issue acceptance is where work is *closed*; the not-verified register is where the
+project's true state is *stated*. Keep it in one place — a "not verified" section in `ROADMAP.md`
+is enough — because scattered across closing comments it is not readable. Never let "0 open" stand
+in for "everything works".
+
+## 13. Adoption checklist for a new project
 
 1. Create the repository and push an initial commit.
 2. Add `LICENSE` and `THIRD-PARTY-NOTICES.md` if the project distributes code.
@@ -257,7 +387,13 @@ If you batch, batch within a phase (Alfred's milestones A–E), not across phase
    gh-api.
 9. Open the Step 0 gate issue and close it with evidence or a recorded known limitation, then
    write the first work issue in the §5 anatomy (`Blocked by: none`, exact acceptance command).
-10. Compute the critical path and confirm the first dispatchable frontier.
-11. Give the worker its own `git worktree`, dispatch, and require the report: command, raw
+10. Run the **§5.1 spec checklist** on that issue before dispatching it. Correct the issue text,
+    not the worker's interpretation of it.
+11. Identify the hub files (the few touched by nearly everything) and compute the critical path;
+    confirm the first dispatchable frontier.
+12. Give the worker its own `git worktree`, dispatch, and require the report: command, raw
     output, SHA.
-12. Re-run the acceptance independently, comment the result, and close.
+13. Re-run the acceptance independently — after any rebase too — and gate the merge on build
+    clean, `0 failed`, `0 ignored`, and a diff confined to the declared files.
+14. File anything the workers report out of scope (§7.3), and keep the not-verified register
+    (§12) up to date as you go, not at the end.
