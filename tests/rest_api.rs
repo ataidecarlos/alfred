@@ -8,12 +8,15 @@
 mod rest_api {
     use std::path::Path;
     use std::sync::atomic::AtomicUsize;
-    use std::sync::{Arc, OnceLock};
+    use std::sync::{Arc, Mutex, OnceLock};
     use std::time::Instant;
 
+    use async_trait::async_trait;
     use serde_json::{json, Value};
 
-    use alfred::config::{JobsConfig, PiConfig};
+    use alfred::config::{JobsConfig, PiConfig, TelegramConfig};
+    use alfred::connectors::telegram::MessageSender;
+    use alfred::error::AlfredError;
     use alfred::server::{app, AppState};
     use alfred::store::Store;
 
@@ -31,6 +34,38 @@ mod rest_api {
             dir
         })
         .path()
+    }
+
+    /// A `[pi]` config whose binary is the compiled double, so a manual run
+    /// never reaches the network or a live Pi.
+    fn fixture_pi_config() -> PiConfig {
+        let mut config = PiConfig::default();
+        config.binary = Path::new(env!("CARGO_BIN_EXE_fake-pi"))
+            .to_string_lossy()
+            .into_owned();
+        config.api_key_env = "ALFRED_ISSUE59_UNSET_API_KEY".to_string();
+        config.timeout_secs = 30;
+        config
+    }
+
+    /// Records outbound messages instead of calling the Bot API.
+    #[derive(Default)]
+    struct Recorder {
+        sent: Mutex<Vec<(i64, String)>>,
+    }
+
+    impl Recorder {
+        fn messages(&self) -> Vec<(i64, String)> {
+            self.sent.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl MessageSender for Recorder {
+        async fn send(&self, chat_id: i64, text: &str) -> Result<(), AlfredError> {
+            self.sent.lock().unwrap().push((chat_id, text.to_string()));
+            Ok(())
+        }
     }
 
     struct TestServer {
@@ -53,18 +88,36 @@ mod rest_api {
             jobs: JobsConfig,
             pi_version: Option<&str>,
         ) -> Self {
+            Self::start_full(api_key, jobs, pi_version, PiConfig::default(), None, None).await
+        }
+
+        /// Build a server with the full injected configuration, so a manual run
+        /// can be proved against the compiled `fake-pi` double and an in-memory
+        /// Telegram `sender` instead of the network.
+        async fn start_full(
+            api_key: Option<&str>,
+            jobs: JobsConfig,
+            pi_version: Option<&str>,
+            pi: PiConfig,
+            telegram: Option<TelegramConfig>,
+            sender: Option<Arc<dyn MessageSender>>,
+        ) -> Self {
             isolated_home();
             let db = tempfile::tempdir().expect("temp db dir");
-            let store = Arc::new(Store::new(&db.path().join("rest.db")).expect("store"));
+            let store = Arc::new(
+                Store::new(&db.path().join("rest.db"))
+                    .expect("store")
+                    .with_telegram_sender_override(sender),
+            );
             let state = AppState {
                 store: store.clone(),
                 start_time: Instant::now(),
                 active_connections: Arc::new(AtomicUsize::new(0)),
                 port: 0,
                 api_key: api_key.map(str::to_string),
-                pi: PiConfig::default(),
+                pi,
                 jobs,
-                telegram: None,
+                telegram,
                 pi_version: pi_version.map(str::to_string),
             };
 
@@ -438,12 +491,31 @@ mod rest_api {
     }
 
     #[tokio::test]
-    async fn run_endpoint_stubs_known_jobs_and_rejects_unknown_ones() {
-        let server = TestServer::start(None).await;
+    async fn run_endpoint_executes_and_delivers_a_known_job() {
+        let recorder = Arc::new(Recorder::default());
+        let jobs = JobsConfig::default();
+        let server = TestServer::start_full(
+            None,
+            jobs,
+            None,
+            fixture_pi_config(),
+            None,
+            Some(recorder.clone()),
+        )
+        .await;
+
+        let body = json!({
+            "name": "manual",
+            "kind": "once",
+            "run_at": 2_000_000_000i64,
+            "prompt": "check the inbox",
+            "report": "always",
+            "deliver_to": "4242",
+        });
         let created: Value = server
             .client
             .post(server.url("/api/jobs"))
-            .json(&once_body("stub"))
+            .json(&body)
             .send()
             .await
             .expect("post")
@@ -458,7 +530,89 @@ mod rest_api {
             .send()
             .await
             .expect("run");
-        assert_eq!(resp.status(), reqwest::StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+        let run: Value = resp.json().await.expect("run json");
+        assert_eq!(run["status"], "success");
+        assert_eq!(run["job_id"], id);
+        assert_eq!(run["delivered"], true);
+        assert!(
+            run["output"]
+                .as_str()
+                .is_some_and(|output| output.starts_with("reply to: check the inbox")),
+            "output was: {}",
+            run["output"]
+        );
+
+        // The run is recorded on the job and the result reached the recipient.
+        let listed: Vec<Value> = server
+            .client
+            .get(server.url(&format!("/api/jobs/{id}/runs")))
+            .send()
+            .await
+            .expect("runs")
+            .json()
+            .await
+            .expect("runs json");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0]["status"], "success");
+        assert_eq!(recorder.messages().len(), 1);
+        assert_eq!(recorder.messages()[0].0, 4242);
+    }
+
+    #[tokio::test]
+    async fn run_endpoint_on_signal_no_match_is_a_200_not_delivered() {
+        // The default report policy is `on_signal`. The fake-pi reply has no
+        // verdict line, so `missing_verdict = skip` records NO_MATCH: a result,
+        // delivered over HTTP as 200, but not sent anywhere.
+        let recorder = Arc::new(Recorder::default());
+        let jobs = JobsConfig {
+            missing_verdict: "skip".to_string(),
+            ..JobsConfig::default()
+        };
+        let server = TestServer::start_full(
+            None,
+            jobs,
+            None,
+            fixture_pi_config(),
+            None,
+            Some(recorder.clone()),
+        )
+        .await;
+
+        let body = json!({
+            "name": "quiet",
+            "kind": "once",
+            "run_at": 2_000_000_000i64,
+            "prompt": "check the inbox",
+            "deliver_to": "4242",
+        });
+        let created: Value = server
+            .client
+            .post(server.url("/api/jobs"))
+            .json(&body)
+            .send()
+            .await
+            .expect("post")
+            .json()
+            .await
+            .expect("created json");
+        let id = created["id"].as_str().expect("id").to_string();
+
+        let resp = server
+            .client
+            .post(server.url(&format!("/api/jobs/{id}/run")))
+            .send()
+            .await
+            .expect("run");
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+        let run: Value = resp.json().await.expect("run json");
+        assert_eq!(run["status"], "success");
+        assert_eq!(run["verdict"], "NO_MATCH");
+        assert_eq!(run["delivered"], false);
+        assert!(
+            recorder.messages().is_empty(),
+            "an on_signal NO_MATCH run must not be delivered"
+        );
     }
 
     #[tokio::test]

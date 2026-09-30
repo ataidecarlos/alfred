@@ -23,3 +23,7 @@ cron = "0.17.0"
 
 [dev-dependencies]
 tempfile = "3"
+
+[[bin]]
+name = "fake-pi"
+path = "src/bin/fake-pi.rs"

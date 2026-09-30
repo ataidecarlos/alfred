@@ -202,6 +202,7 @@ alfred job add --name inbox --prompt "Check for urgent mail" --watch "*/30 * * *
 
 alfred job list
 alfred job show daily
+alfred job run daily             # run it now, synchronously
 alfred job runs daily          # run history, newest first
 alfred job disable daily
 alfred job enable daily
@@ -214,9 +215,20 @@ The scheduler ticks every 30 seconds, runs due jobs through Pi (bounded by
 job more than an hour overdue is recorded `missed`. A dispatcher that panics is
 recorded `failed` and does not stop the loop.
 
-> Manual runs are not wired yet: `alfred job run <id>` and
-> `POST /api/jobs/{id}/run` report that the manual-run path is unavailable. The
-> scheduler runs due jobs automatically.
+`alfred job run <id>` runs a job immediately, synchronously, through the same
+runner and delivery path the scheduler uses — a manual run and a scheduled run
+record the same run row and deliver the result according to the job's `report`
+policy. It prints the run's outcome and verdict and exits `0` on a successful
+run, non-zero on a failed one.
+
+```bash
+alfred job run daily
+# run:        <uuid>
+# status:     success
+# verdict:    MATCH
+# delivered:  yes
+# output:     ...
+```
 
 ## Todos
 
@@ -293,7 +305,7 @@ When `[server].api_key` is set, `/api/*` (not `/health` or `/api/info`) requires
 | GET | `/api/jobs/{id}` | Get one job |
 | PUT | `/api/jobs/{id}` | Replace a job |
 | DELETE | `/api/jobs/{id}` | Delete a job |
-| POST | `/api/jobs/{id}/run` | Manual run (not wired; returns 501) |
+| POST | `/api/jobs/{id}/run` | Run a job now; returns the recorded run |
 | GET | `/api/jobs/{id}/runs` | List a job's runs |
 | GET | `/api/memories` | List memories as `{slug, text}` |
 | POST | `/api/memories` | Append a memory (`{"text": "..."}`) |
@@ -304,7 +316,15 @@ curl -s localhost:8080/health
 curl -s localhost:8080/api/info
 curl -s -X POST localhost:8080/api/todos \
   -H "Content-Type: application/json" -d '{"title":"REST todo","priority":"high"}'
+# Run a job now; the response is the recorded run (status success/failed/timeout).
+curl -s -X POST localhost:8080/api/jobs/<id>/run
 ```
+
+`POST /api/jobs/{id}/run` executes the job synchronously through the same runner
+and delivery as the scheduler: it records the run row (including delivery) and
+returns it as JSON. An unknown id is a `404`; a known job always returns `200`,
+and the run's `status` distinguishes a successful run from a failed one. A job
+with an `on_signal` report policy is delivered only on a `MATCH` verdict.
 
 A job body uses `name`, `kind` (`once`|`recurring`|`watch`), `schedule`,
 `run_at` (Unix seconds), `prompt`, `report`, `deliver_to`, `model`, `tools`, and

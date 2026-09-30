@@ -5,10 +5,13 @@ use axum::http::request::Parts;
 use axum::extract::FromRequestParts;
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use crate::error::AlfredError;
+use crate::jobs::dispatch::JobDispatch;
 use crate::jobs::{Job, JobKind, JobRun, NewJob, ReportPolicy};
 use crate::memory;
+use crate::scheduler::{run_to_completion, Dispatch};
 use crate::server::AppState;
 
 pub struct AuthUser;
@@ -311,19 +314,26 @@ pub async fn delete_job(
 
 /// Request a manual run of a job.
 ///
-/// The job runner and the scheduler loop are separate issues, so until they
-/// land there is nothing to dispatch to: a known job answers `501` rather than
-/// fabricating a run row. An unknown id still answers `404`.
+/// The job is executed synchronously through the same composed
+/// [`JobDispatch`] the scheduler installs: the run row is opened, closed, and
+/// delivered to exactly as a scheduled run would be. An unknown id is a `404`;
+/// a known job always returns `200` carrying the recorded run, whose `status`
+/// distinguishes a successful run from a failed one. A run whose `status` is
+/// `failed` or `timeout` is a result, not a transport failure.
 pub async fn run_job(
     State(state): State<AppState>,
     _auth: AuthUser,
     Path(id): Path<String>,
-) -> Result<StatusCode, ApiError> {
-    state.store.get_job(&id)?;
-    Err(ApiError::new(
-        StatusCode::NOT_IMPLEMENTED,
-        "manual runs are not available until the job runner lands",
-    ))
+) -> Result<Json<JobRun>, ApiError> {
+    let job = state.store.get_job(&id)?;
+    let dispatch: Arc<dyn Dispatch> = Arc::new(JobDispatch::from_config(
+        Arc::clone(&state.store),
+        &state.pi,
+        &state.jobs,
+        state.telegram.as_ref(),
+    ));
+    let run = run_to_completion(&state.store, &dispatch, state.jobs.max_runs_per_job, &job).await?;
+    Ok(Json(run))
 }
 
 pub async fn list_job_runs(
