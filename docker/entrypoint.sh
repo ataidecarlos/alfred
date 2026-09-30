@@ -3,8 +3,7 @@
 #
 # Usage:
 #   docker run --rm alfred-test                  # start the server (foreground)
-#   docker run --rm alfred-test alfred workitem list
-#                                                # run an Alfred CLI command
+#   docker run --rm alfred-test alfred job list  # run an Alfred CLI command
 #   docker run --rm alfred-test curl -s localhost:3000/health
 #                                                # boot a throwaway server, wait
 #                                                # for health, then run <cmd>
@@ -25,12 +24,14 @@ for name in system user; do
     fi
 done
 
-# The server refuses to start without an API key on the default provider. A
-# pristine smoke test only needs the process to boot, so fall back to a
-# placeholder when the key is unset. Set a real OPENAI_API_KEY for LLM calls.
-if [ -z "${OPENAI_API_KEY:-}" ]; then
-    echo "warning: OPENAI_API_KEY is not set; using a placeholder so the server can boot (health checks only)" >&2
-    export OPENAI_API_KEY="placeholder-set-real-key-for-llm-requests"
+# Alfred runs Pi as a subprocess; the provider key is read from the environment
+# variable named by [pi].api_key_env (PI_API_KEY in docker/config.toml) and is
+# only needed when an LLM call runs. A pristine smoke test just boots the server
+# and probes /health and /api/info, so fall back to a placeholder when the key is
+# unset. Set a real PI_API_KEY to run jobs.
+if [ -z "${PI_API_KEY:-}" ]; then
+    echo "warning: PI_API_KEY is not set; using a placeholder so the server can boot (health checks only)" >&2
+    export PI_API_KEY="placeholder-set-real-key-for-llm-requests"
 fi
 
 # No arguments: run the server in the foreground.

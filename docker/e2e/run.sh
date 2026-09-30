@@ -72,6 +72,9 @@ ENV_FILE="$(mktemp "${TMPDIR:-/tmp}/alfred-e2e-env.XXXXXX")"
 chmod 600 "$ENV_FILE"
 trap 'rm -f "$ENV_FILE"' EXIT
 {
+    # This must stay the exact name [pi].api_key_env uses in
+    # docker/e2e/config.toml, or the container would carry a key Alfred never
+    # reads.
     printf 'OPENCODE_GO_API_KEY=%s\n' "$OPENCODE_GO_API_KEY"
     printf 'RUST_LOG=%s\n' "${RUST_LOG:-info}"
 } > "$ENV_FILE"

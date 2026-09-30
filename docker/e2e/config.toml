@@ -1,27 +1,31 @@
 # Pristine Alfred config used by the continuous e2e container.
 #
-# The API key is injected at runtime through the OPENCODE_GO_API_KEY
+# The provider key is injected at runtime through the OPENCODE_GO_API_KEY
 # environment variable (see docker/e2e/run.sh, which reads it from the AKC
-# vault). No secret value is stored in this file or in the repository.
+# vault). That is the exact name [pi].api_key_env below, so the container uses
+# the key the harness provides; no secret value is stored in this file or in
+# the repository.
+#
+# Alfred delegates the agent loop to Pi, so there is no in-process LLM layer and
+# no [llm] section: `pi` is launched as a subprocess and reads its key from the
+# named environment variable.
 
 [server]
 port = 3000
 host = "0.0.0.0"
 
-[llm]
-default_provider = "opencode-go"
-
-[llm.providers.opencode-go]
-api_key = "${OPENCODE_GO_API_KEY}"
+# The Pi subprocess. `binary` must be on PATH (the image installs it).
+[pi]
+binary = "pi"
+api_key_env = "OPENCODE_GO_API_KEY"
+provider = "opencode-go"
 model = "space-bunny-free"
-base_url = "https://opencode.ai/zen/go/v1"
+thinking = "off"
 
 [prompt]
 system_prompt_file = "/home/alfred/.alfred/config/prompts/system.md"
 user_prompt_file = "/home/alfred/.alfred/config/prompts/user.md"
 
-[scheduler]
-enabled = false
-
-[memory]
-enabled = false
+# Alfred's own scheduler owns the e2e jobs; no OS cron.
+[jobs]
+enabled = true
