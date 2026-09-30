@@ -57,11 +57,7 @@ mod delivery {
     }
 
     /// Store a `digest` job with the given policy and destination.
-    fn stored_job(
-        store: &Store,
-        report: ReportPolicy,
-        deliver_to: Option<&str>,
-    ) -> Job {
+    fn stored_job(store: &Store, report: ReportPolicy, deliver_to: Option<&str>) -> Job {
         store
             .add_job(
                 &NewJob {
@@ -109,8 +105,8 @@ mod delivery {
         let run_id = completed_run(&store, &job, &end);
 
         let recorder = Arc::new(Recorder::default());
-        let delivery = Delivery::new(Some("test-token".to_string()), &[])
-            .with_sender(recorder.clone());
+        let delivery =
+            Delivery::new(Some("test-token".to_string()), &[]).with_sender(recorder.clone());
 
         let outcome = delivery.deliver(&store, &run_id, &job, &end).await;
 
@@ -132,8 +128,8 @@ mod delivery {
         let run_id = completed_run(&store, &job, &end);
 
         let recorder = Arc::new(Recorder::default());
-        let delivery = Delivery::new(Some("test-token".to_string()), &[])
-            .with_sender(recorder.clone());
+        let delivery =
+            Delivery::new(Some("test-token".to_string()), &[]).with_sender(recorder.clone());
 
         let outcome = delivery.deliver(&store, &run_id, &job, &end).await;
 
@@ -150,8 +146,8 @@ mod delivery {
         let run_id = completed_run(&store, &job, &end);
 
         let recorder = Arc::new(Recorder::default());
-        let delivery = Delivery::new(Some("test-token".to_string()), &[])
-            .with_sender(recorder.clone());
+        let delivery =
+            Delivery::new(Some("test-token".to_string()), &[]).with_sender(recorder.clone());
 
         let outcome = delivery.deliver(&store, &run_id, &job, &end).await;
 
@@ -215,8 +211,8 @@ mod delivery {
         let run_id = completed_run(&store, &job, &end);
 
         let recorder = Arc::new(Recorder::default());
-        let delivery = Delivery::new(Some("test-token".to_string()), &[42, 99])
-            .with_sender(recorder.clone());
+        let delivery =
+            Delivery::new(Some("test-token".to_string()), &[42, 99]).with_sender(recorder.clone());
 
         let outcome = delivery.deliver(&store, &run_id, &job, &end).await;
 
@@ -235,8 +231,8 @@ mod delivery {
         let run_id = completed_run(&store, &job, &end);
 
         let recorder = Arc::new(Recorder::default());
-        let delivery = Delivery::new(Some("test-token".to_string()), &[])
-            .with_sender(recorder.clone());
+        let delivery =
+            Delivery::new(Some("test-token".to_string()), &[]).with_sender(recorder.clone());
 
         let outcome = delivery.deliver(&store, &run_id, &job, &end).await;
 

@@ -15,7 +15,11 @@ pub enum AlfredError {
     PiSpawn { binary: String, message: String },
 
     #[error("Pi process '{binary}' exited while running (status: {status}); stderr: {stderr}")]
-    PiProcessExited { binary: String, status: String, stderr: String },
+    PiProcessExited {
+        binary: String,
+        status: String,
+        stderr: String,
+    },
 
     #[error("store error: {0}")]
     Store(#[from] rusqlite::Error),

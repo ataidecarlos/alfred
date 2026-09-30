@@ -67,7 +67,9 @@ pub struct ApiMessageSender {
 
 impl ApiMessageSender {
     pub fn new(token: impl Into<String>) -> Self {
-        Self { token: token.into() }
+        Self {
+            token: token.into(),
+        }
     }
 }
 
@@ -110,7 +112,10 @@ async fn send_chunk(
     let url = format!("https://api.telegram.org/bot{token}/sendMessage");
     let resp = client
         .post(&url)
-        .json(&SendMessageRequest { chat_id, text: text.to_string() })
+        .json(&SendMessageRequest {
+            chat_id,
+            text: text.to_string(),
+        })
         .send()
         .await
         .map_err(|e| AlfredError::Connector(format!("failed to send: {e}")))?;
@@ -283,7 +288,8 @@ impl TelegramConnector {
         match result {
             Ok(reply) => self.sender.send(chat_id, &reply).await,
             Err(error) => {
-                self.report(chat_id, &format!("Pi session error: {error}")).await;
+                self.report(chat_id, &format!("Pi session error: {error}"))
+                    .await;
                 Err(error)
             }
         }
@@ -309,7 +315,8 @@ impl TelegramConnector {
         match result {
             Ok(()) => self.sender.send(chat_id, "Session cleared.").await,
             Err(error) => {
-                self.report(chat_id, &format!("Pi session error: {error}")).await;
+                self.report(chat_id, &format!("Pi session error: {error}"))
+                    .await;
                 Err(error)
             }
         }
@@ -396,11 +403,15 @@ impl TelegramConnector {
             }
             match append_memory_at(&self.memories_file, memory) {
                 Ok(()) => {
-                    self.sender.send(chat.id, &format!("Remembered: {memory}")).await?;
+                    self.sender
+                        .send(chat.id, &format!("Remembered: {memory}"))
+                        .await?;
                 }
                 Err(error) => {
                     error!(path = %self.memories_file.display(), %error, "telegram: /remember failed");
-                    self.sender.send(chat.id, &format!("Error: {error}")).await?;
+                    self.sender
+                        .send(chat.id, &format!("Error: {error}"))
+                        .await?;
                 }
             }
             return Ok(());
@@ -445,7 +456,11 @@ impl Connector for TelegramConnector {
             }
 
             let body: serde_json::Value = resp.json().await.unwrap_or_default();
-            let updates = body.get("result").and_then(|r| r.as_array()).cloned().unwrap_or_default();
+            let updates = body
+                .get("result")
+                .and_then(|r| r.as_array())
+                .cloned()
+                .unwrap_or_default();
 
             for update_val in updates {
                 if let Some(id) = update_val.get("update_id").and_then(Value::as_i64) {

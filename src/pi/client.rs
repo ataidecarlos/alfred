@@ -30,7 +30,11 @@ pub struct JsonlReader<R> {
 
 impl<R: AsyncRead + Unpin> JsonlReader<R> {
     pub fn new(inner: R) -> Self {
-        Self { inner, buffer: Vec::new(), eof: false }
+        Self {
+            inner,
+            buffer: Vec::new(),
+            eof: false,
+        }
     }
 
     /// Read the next raw record without its terminator, or `None` at end of
@@ -123,7 +127,10 @@ impl PiClient {
     /// naming that path.
     pub async fn spawn(binary: &str, mut command: Command) -> Result<Self, AlfredError> {
         command.kill_on_drop(true);
-        command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         let mut child = command.spawn().map_err(|error| AlfredError::PiSpawn {
             binary: binary.to_string(),
             message: error.to_string(),
@@ -148,7 +155,9 @@ impl PiClient {
             let mut captured = Vec::new();
             let _ = stderr_pipe.read_to_end(&mut captured).await;
             let text = String::from_utf8_lossy(&captured);
-            let mut sink = stderr_sink.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut sink = stderr_sink
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             sink.push_str(&text);
         });
 
@@ -199,7 +208,10 @@ impl PiClient {
 
     /// Stderr captured from the subprocess so far.
     pub fn captured_stderr(&self) -> String {
-        self.stderr.lock().map(|captured| captured.clone()).unwrap_or_else(|poisoned| poisoned.into_inner().clone())
+        self.stderr
+            .lock()
+            .map(|captured| captured.clone())
+            .unwrap_or_else(|poisoned| poisoned.into_inner().clone())
     }
 
     /// Write a command without waiting for its response. An `id` is generated
@@ -273,7 +285,10 @@ impl PiClient {
     async fn process_error(&mut self, operation: &str, error: std::io::Error) -> AlfredError {
         match self.child.try_wait() {
             Ok(Some(status)) => self.exited_error(status.to_string()).await,
-            _ => AlfredError::Pi(format!("failed to {operation} for Pi process '{}': {error}", self.binary)),
+            _ => AlfredError::Pi(format!(
+                "failed to {operation} for Pi process '{}': {error}",
+                self.binary
+            )),
         }
     }
 
@@ -291,7 +306,11 @@ impl PiClient {
         if let Some(task) = self.stderr_task.take() {
             let _ = task.await;
         }
-        AlfredError::PiProcessExited { binary: self.binary.clone(), status, stderr: self.captured_stderr() }
+        AlfredError::PiProcessExited {
+            binary: self.binary.clone(),
+            status,
+            stderr: self.captured_stderr(),
+        }
     }
 }
 

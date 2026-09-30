@@ -64,13 +64,20 @@ fn main() {
                 // The shell double answered an unparseable command as an
                 // unknown command; the client never sends one, so this is
                 // best-effort parity rather than a modelled path.
-                let _ = write_record(&mut out, &Record::Json(failed(None, "", "unknown command: ")));
+                let _ = write_record(
+                    &mut out,
+                    &Record::Json(failed(None, "", "unknown command: ")),
+                );
                 let _ = out.flush();
                 continue;
             }
         };
 
-        let command = value.get("type").and_then(Value::as_str).unwrap_or("").to_string();
+        let command = value
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
         let id = value.get("id").cloned();
 
         let records = match dispatch(&command, &value, id.as_ref(), &mut last_text) {
@@ -94,17 +101,24 @@ fn dispatch(
     last_text: &mut Option<String>,
 ) -> Result<Vec<Record>, String> {
     match command {
-        "get_state" => Ok(vec![Record::Json(with_data(response(id, command, true), state_data()))]),
+        "get_state" => Ok(vec![Record::Json(with_data(
+            response(id, command, true),
+            state_data(),
+        ))]),
         "get_last_assistant_text" => {
             let text = match last_text {
                 Some(text) => Value::String(text.clone()),
                 None => Value::Null,
             };
-            Ok(vec![Record::Json(with_data(response(id, command, true), json!({ "text": text })))])
+            Ok(vec![Record::Json(with_data(
+                response(id, command, true),
+                json!({ "text": text }),
+            ))])
         }
-        "get_session_stats" => {
-            Ok(vec![Record::Json(with_data(response(id, command, true), session_stats_data()))])
-        }
+        "get_session_stats" => Ok(vec![Record::Json(with_data(
+            response(id, command, true),
+            session_stats_data(),
+        ))]),
         "prompt" => {
             let message = value.get("message").and_then(Value::as_str).unwrap_or("");
             let reply = format!("reply to: {message}");
@@ -114,7 +128,9 @@ fn dispatch(
                 Record::Json(response(id, command, true)),
                 Record::Json(json!({ "type": "agent_start" })),
                 Record::Raw("this line is malformed on purpose; clients must warn and skip it"),
-                Record::Json(json!({ "type": "message_start", "message": { "role": "assistant" } })),
+                Record::Json(
+                    json!({ "type": "message_start", "message": { "role": "assistant" } }),
+                ),
                 Record::Json(json!({
                     "type": "message_update",
                     "assistantMessageEvent": { "type": "text_delta", "delta": reply },

@@ -78,7 +78,9 @@ mod jobs {
     #[test]
     fn duplicate_name_is_rejected() {
         let (_dir, store) = store();
-        store.add_job(&once("probe", 0), MIN_WATCH).expect("first add");
+        store
+            .add_job(&once("probe", 0), MIN_WATCH)
+            .expect("first add");
 
         let error = store
             .add_job(&once("probe", 0), MIN_WATCH)
@@ -116,7 +118,9 @@ mod jobs {
         let (_dir, store) = store();
         let mut job = once("o", 0);
         job.run_at = None;
-        let error = store.add_job(&job, MIN_WATCH).expect_err("once needs run_at");
+        let error = store
+            .add_job(&job, MIN_WATCH)
+            .expect_err("once needs run_at");
         assert!(error.to_string().contains("run_at"), "message was: {error}");
     }
 
@@ -142,7 +146,9 @@ mod jobs {
         let (_dir, store) = store();
         let now = 1_000_000;
 
-        let due = store.add_job(&once("due", now - 60), MIN_WATCH).expect("due");
+        let due = store
+            .add_job(&once("due", now - 60), MIN_WATCH)
+            .expect("due");
         store
             .add_job(&once("future", now + 3600), MIN_WATCH)
             .expect("future");
@@ -205,7 +211,9 @@ mod jobs {
     #[test]
     fn runs_record_end_and_job_lifecycle() {
         let (_dir, store) = store();
-        let job = store.add_job(&once("lifecycle", 0), MIN_WATCH).expect("add");
+        let job = store
+            .add_job(&once("lifecycle", 0), MIN_WATCH)
+            .expect("add");
         let run_id = store.record_run_start(&job.id).expect("start");
         let mut end = RunEnd::new("success");
         end.verdict = Some("MATCH".to_string());
@@ -226,7 +234,11 @@ mod jobs {
         let disabled = store.set_enabled(&job.id, false).expect("disable");
         assert!(!disabled.enabled);
         assert_eq!(
-            store.get_job("lifecycle").expect("get").last_status.as_deref(),
+            store
+                .get_job("lifecycle")
+                .expect("get")
+                .last_status
+                .as_deref(),
             Some("success")
         );
 
@@ -235,6 +247,9 @@ mod jobs {
             store.get_job(&job.id).expect_err("gone"),
             AlfredError::JobNotFound(_)
         ));
-        assert!(store.runs_for(&job.id, 10).is_err(), "runs are removed with the job");
+        assert!(
+            store.runs_for(&job.id, 10).is_err(),
+            "runs are removed with the job"
+        );
     }
 }

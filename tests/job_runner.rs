@@ -120,7 +120,9 @@ mod job_runner {
         let (_dir, store) = temp_store();
         let job = stored_job(&store, &signal_job("the job prompt"));
 
-        let (system, prompt) = runner(MissingVerdict::Notify).prepare(&job).expect("prepare");
+        let (system, prompt) = runner(MissingVerdict::Notify)
+            .prepare(&job)
+            .expect("prepare");
 
         // The assembled prompt is the persona; the job prompt is not folded in.
         assert!(
@@ -243,7 +245,10 @@ mod job_runner {
             "an unknown policy must fail open, never drop alerts"
         );
         assert_eq!(MissingVerdict::default(), MissingVerdict::Notify);
-        assert_eq!(MissingVerdict::parse(&JobsConfig::default().missing_verdict), MissingVerdict::Notify);
+        assert_eq!(
+            MissingVerdict::parse(&JobsConfig::default().missing_verdict),
+            MissingVerdict::Notify
+        );
     }
 
     // ------------------------------------------------------ the terminal RunEnd
@@ -254,10 +259,7 @@ mod job_runner {
         let job = stored_job(&store, &signal_job("probe"));
         let record = runner(MissingVerdict::Notify);
 
-        let end = record.finish_run(
-            &job,
-            Ok(exit_failure("reply to: probe")),
-        );
+        let end = record.finish_run(&job, Ok(exit_failure("reply to: probe")));
 
         assert_eq!(end.status, STATUS_FAILED);
         assert_eq!(end.output.as_deref(), Some("reply to: probe"));
@@ -271,10 +273,7 @@ mod job_runner {
         let job = stored_job(&store, &signal_job("probe"));
         let record = runner(MissingVerdict::Notify);
 
-        let end = record.finish_run(
-            &job,
-            Ok(success(None)),
-        );
+        let end = record.finish_run(&job, Ok(success(None)));
 
         assert_eq!(end.status, STATUS_FAILED);
         assert!(
@@ -323,10 +322,7 @@ mod job_runner {
         let job = stored_job(&store, &signal_job("probe"));
         let record = runner(MissingVerdict::Notify);
 
-        let end = record.finish_run(
-            &job,
-            Ok(success(Some("...\nVERDICT: MAYBE\n"))),
-        );
+        let end = record.finish_run(&job, Ok(success(Some("...\nVERDICT: MAYBE\n"))));
 
         assert_eq!(end.status, STATUS_FAILED);
         assert!(
@@ -346,7 +342,12 @@ mod job_runner {
 
         let end = record.finish_run(
             &job,
-            Ok(with_stats(success(Some("found it\nVERDICT: MATCH\n")), 10, 5, 0.25)),
+            Ok(with_stats(
+                success(Some("found it\nVERDICT: MATCH\n")),
+                10,
+                5,
+                0.25,
+            )),
         );
 
         assert_eq!(end.status, STATUS_SUCCESS);
@@ -362,7 +363,10 @@ mod job_runner {
     async fn successful_run_closes_its_row_with_a_verdict() {
         let (_dir, store) = temp_store();
         let store = Arc::new(store);
-        let id = store.add_job(&signal_job("ping the fixture"), MIN_WATCH).expect("add").id;
+        let id = store
+            .add_job(&signal_job("ping the fixture"), MIN_WATCH)
+            .expect("add")
+            .id;
 
         let end = run_via_scheduler(&store, &id, MissingVerdict::Notify).await;
         let run = latest_run(&store, &id);
@@ -411,7 +415,10 @@ mod job_runner {
     async fn spawn_failure_points_the_run_at_failed_not_running() {
         let (_dir, store) = temp_store();
         let store = Arc::new(store);
-        let id = store.add_job(&signal_job("probe"), MIN_WATCH).expect("add").id;
+        let id = store
+            .add_job(&signal_job("probe"), MIN_WATCH)
+            .expect("add")
+            .id;
 
         let mut pi = fixture_pi_config();
         pi.binary = "alfred-issue11-missing-pi-binary".to_string();
@@ -439,7 +446,10 @@ mod job_runner {
         // `timeout`, never `running`.
         let (_dir, store) = temp_store();
         let store = Arc::new(store);
-        let id = store.add_job(&signal_job("probe"), MIN_WATCH).expect("add").id;
+        let id = store
+            .add_job(&signal_job("probe"), MIN_WATCH)
+            .expect("add")
+            .id;
 
         let runner = runner(MissingVerdict::Notify);
         let job = store.get_job(&id).expect("job");
@@ -458,7 +468,10 @@ mod job_runner {
     async fn the_runner_implements_dispatch_for_real_subprocesses() {
         let (_dir, store) = temp_store();
         let store = Arc::new(store);
-        let id = store.add_job(&signal_job("dispatch me"), MIN_WATCH).expect("add").id;
+        let id = store
+            .add_job(&signal_job("dispatch me"), MIN_WATCH)
+            .expect("add")
+            .id;
         let job = store.get_job(&id).expect("job");
 
         let runner = runner(MissingVerdict::Notify);
@@ -489,11 +502,7 @@ mod job_runner {
     }
 
     /// Run `id` through a scheduler over `runner` and return the terminal end.
-    async fn dispatch_via_scheduler(
-        store: Arc<Store>,
-        id: &str,
-        runner: Arc<JobRunner>,
-    ) -> RunEnd {
+    async fn dispatch_via_scheduler(store: Arc<Store>, id: &str, runner: Arc<JobRunner>) -> RunEnd {
         let job = store.get_job(id).expect("job");
         let scheduler = Arc::new(Scheduler::new(
             Arc::clone(&store),

@@ -3,7 +3,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use chrono::Utc;
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -156,7 +156,7 @@ impl Store {
             DROP TABLE IF EXISTS conversations;
             DROP TABLE IF EXISTS sessions;
             DROP TABLE IF EXISTS messages;
-            DROP TABLE IF EXISTS memories;"
+            DROP TABLE IF EXISTS memories;",
         )?;
         Ok(Self {
             conn: Mutex::new(conn),
@@ -182,10 +182,18 @@ impl Store {
         self.telegram_sender.clone()
     }
 
-    pub fn add_todo(&self, title: &str, description: &str, priority: &str, due_date: &str) -> Result<String, AlfredError> {
+    pub fn add_todo(
+        &self,
+        title: &str,
+        description: &str,
+        priority: &str,
+        due_date: &str,
+    ) -> Result<String, AlfredError> {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().timestamp();
-        let conn = self.conn.lock().map_err(|e| AlfredError::Store(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+        let conn = self.conn.lock().map_err(|e| {
+            AlfredError::Store(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
         conn.execute(
             "INSERT INTO todos (id, title, description, priority, due_date, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![id, title, description, priority, if due_date.is_empty() { None } else { Some(due_date) }, now, now],
@@ -194,25 +202,33 @@ impl Store {
     }
 
     pub fn list_todos(&self) -> Result<Vec<Todo>, AlfredError> {
-        let conn = self.conn.lock().map_err(|e| AlfredError::Store(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+        let conn = self.conn.lock().map_err(|e| {
+            AlfredError::Store(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
         let mut stmt = conn.prepare("SELECT id, title, description, priority, completed, due_date FROM todos WHERE completed = 0 ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 END, created_at")?;
-        let todos = stmt.query_map([], |row| {
-            Ok(Todo {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                description: row.get(2)?,
-                priority: row.get(3)?,
-                completed: row.get::<_, i32>(4)? != 0,
-                due_date: row.get(5)?,
-            })
-        })?.collect::<Result<Vec<_>, _>>()?;
+        let todos = stmt
+            .query_map([], |row| {
+                Ok(Todo {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    description: row.get(2)?,
+                    priority: row.get(3)?,
+                    completed: row.get::<_, i32>(4)? != 0,
+                    due_date: row.get(5)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(todos)
     }
 
     /// Look up a todo by id, whether or not it is complete.
     pub fn get_todo(&self, id: &str) -> Result<Option<Todo>, AlfredError> {
-        let conn = self.conn.lock().map_err(|e| AlfredError::Store(rusqlite::Error::InvalidParameterName(e.to_string())))?;
-        let mut stmt = conn.prepare("SELECT id, title, description, priority, completed, due_date FROM todos WHERE id = ?1")?;
+        let conn = self.conn.lock().map_err(|e| {
+            AlfredError::Store(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT id, title, description, priority, completed, due_date FROM todos WHERE id = ?1",
+        )?;
         let mut rows = stmt.query_map(params![id], |row| {
             Ok(Todo {
                 id: row.get(0)?,
@@ -232,33 +248,61 @@ impl Store {
     /// Mark a todo complete. Returns true if a row was changed, false if the id is unknown.
     pub fn complete_todo(&self, id: &str) -> Result<bool, AlfredError> {
         let now = Utc::now().timestamp();
-        let conn = self.conn.lock().map_err(|e| AlfredError::Store(rusqlite::Error::InvalidParameterName(e.to_string())))?;
-        let rows = conn.execute("UPDATE todos SET completed = 1, updated_at = ?1 WHERE id = ?2", params![now, id])?;
+        let conn = self.conn.lock().map_err(|e| {
+            AlfredError::Store(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let rows = conn.execute(
+            "UPDATE todos SET completed = 1, updated_at = ?1 WHERE id = ?2",
+            params![now, id],
+        )?;
         Ok(rows > 0)
     }
 
     pub fn delete_todo(&self, id: &str) -> Result<(), AlfredError> {
-        let conn = self.conn.lock().map_err(|e| AlfredError::Store(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+        let conn = self.conn.lock().map_err(|e| {
+            AlfredError::Store(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
         conn.execute("DELETE FROM todos WHERE id = ?1", params![id])?;
         Ok(())
     }
 
     /// Update todo fields. Returns true if a row was changed, false if the id is unknown.
-    pub fn update_todo(&self, id: &str, title: Option<&str>, description: Option<&str>, priority: Option<&str>, due_date: Option<&str>) -> Result<bool, AlfredError> {
+    pub fn update_todo(
+        &self,
+        id: &str,
+        title: Option<&str>,
+        description: Option<&str>,
+        priority: Option<&str>,
+        due_date: Option<&str>,
+    ) -> Result<bool, AlfredError> {
         let now = Utc::now().timestamp();
-        let conn = self.conn.lock().map_err(|e| AlfredError::Store(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+        let conn = self.conn.lock().map_err(|e| {
+            AlfredError::Store(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
         let mut changed = 0;
         if let Some(t) = title {
-            changed += conn.execute("UPDATE todos SET title = ?1, updated_at = ?2 WHERE id = ?3", params![t, now, id])?;
+            changed += conn.execute(
+                "UPDATE todos SET title = ?1, updated_at = ?2 WHERE id = ?3",
+                params![t, now, id],
+            )?;
         }
         if let Some(d) = description {
-            changed += conn.execute("UPDATE todos SET description = ?1, updated_at = ?2 WHERE id = ?3", params![d, now, id])?;
+            changed += conn.execute(
+                "UPDATE todos SET description = ?1, updated_at = ?2 WHERE id = ?3",
+                params![d, now, id],
+            )?;
         }
         if let Some(p) = priority {
-            changed += conn.execute("UPDATE todos SET priority = ?1, updated_at = ?2 WHERE id = ?3", params![p, now, id])?;
+            changed += conn.execute(
+                "UPDATE todos SET priority = ?1, updated_at = ?2 WHERE id = ?3",
+                params![p, now, id],
+            )?;
         }
         if let Some(d) = due_date {
-            changed += conn.execute("UPDATE todos SET due_date = ?1, updated_at = ?2 WHERE id = ?3", params![d, now, id])?;
+            changed += conn.execute(
+                "UPDATE todos SET due_date = ?1, updated_at = ?2 WHERE id = ?3",
+                params![d, now, id],
+            )?;
         }
         Ok(changed > 0)
     }
@@ -442,7 +486,9 @@ impl Store {
             ],
         )?;
         if changed == 0 {
-            return Err(AlfredError::JobValidation(format!("run not found: {run_id}")));
+            return Err(AlfredError::JobValidation(format!(
+                "run not found: {run_id}"
+            )));
         }
         conn.execute(
             "UPDATE jobs SET last_status=?1, updated_at=?2 \
@@ -474,7 +520,9 @@ impl Store {
             params![delivered as i64, error, run_id],
         )?;
         if changed == 0 {
-            return Err(AlfredError::JobValidation(format!("run not found: {run_id}")));
+            return Err(AlfredError::JobValidation(format!(
+                "run not found: {run_id}"
+            )));
         }
         Ok(())
     }
@@ -482,13 +530,13 @@ impl Store {
     /// A single run by id, including the `delivered` flag.
     pub fn get_run(&self, run_id: &str) -> Result<JobRun, AlfredError> {
         let conn = self.db()?;
-        let mut stmt = conn.prepare(&format!(
-            "SELECT {RUN_COLUMNS} FROM job_runs WHERE id=?1"
-        ))?;
+        let mut stmt = conn.prepare(&format!("SELECT {RUN_COLUMNS} FROM job_runs WHERE id=?1"))?;
         let mut rows = stmt.query_map(params![run_id], job_run_from_row)?;
         match rows.next() {
             Some(run) => Ok(run?),
-            None => Err(AlfredError::JobValidation(format!("run not found: {run_id}"))),
+            None => Err(AlfredError::JobValidation(format!(
+                "run not found: {run_id}"
+            ))),
         }
     }
 
@@ -530,7 +578,9 @@ mod tests {
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
             params![name],
             |row| row.get::<_, i64>(0),
-        ).map(|count| count > 0).unwrap()
+        )
+        .map(|count| count > 0)
+        .unwrap()
     }
 
     #[test]
@@ -554,7 +604,10 @@ mod tests {
             "messages",
             "memories",
         ] {
-            assert!(!table_exists(&store, dropped), "table {dropped} should be dropped");
+            assert!(
+                !table_exists(&store, dropped),
+                "table {dropped} should be dropped"
+            );
         }
     }
 
@@ -564,11 +617,13 @@ mod tests {
         let store = Store::new(&dir.path().join("indexes.db")).unwrap();
         let conn = store.conn.lock().unwrap();
         for index in ["idx_jobs_enabled", "idx_job_runs_job"] {
-            let count: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
-                params![index],
-                |row| row.get(0),
-            ).unwrap();
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
+                    params![index],
+                    |row| row.get(0),
+                )
+                .unwrap();
             assert_eq!(count, 1, "index {index} should exist");
         }
     }
@@ -590,7 +645,10 @@ mod tests {
 
         assert!(store.complete_todo(&id).unwrap());
         assert!(store.get_todo(&id).unwrap().unwrap().completed);
-        assert!(store.list_todos().unwrap().is_empty(), "completed todos are hidden");
+        assert!(
+            store.list_todos().unwrap().is_empty(),
+            "completed todos are hidden"
+        );
         assert!(!store.complete_todo("missing").unwrap());
 
         store.delete_todo(&id).unwrap();

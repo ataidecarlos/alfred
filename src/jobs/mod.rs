@@ -239,9 +239,9 @@ pub fn cron_interval_secs(schedule: &Schedule, now: DateTime<Utc>) -> Result<i64
     let first = upcoming
         .next()
         .ok_or_else(|| AlfredError::JobValidation("cron expression never fires".to_string()))?;
-    let second = upcoming.next().ok_or_else(|| {
-        AlfredError::JobValidation("cron expression fires only once".to_string())
-    })?;
+    let second = upcoming
+        .next()
+        .ok_or_else(|| AlfredError::JobValidation("cron expression fires only once".to_string()))?;
     Ok((second - first).num_seconds())
 }
 

@@ -159,7 +159,10 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("config").join("memories.md");
 
-        assert!(list_memories_at(&path).is_empty(), "missing file lists as empty");
+        assert!(
+            list_memories_at(&path).is_empty(),
+            "missing file lists as empty"
+        );
 
         append_memory_at(&path, "First memory").unwrap();
         append_memory_at(&path, "Second memory").unwrap();
@@ -199,7 +202,10 @@ mod tests {
         assert_eq!(read_memories_at(&path).unwrap(), "Remember the milk\n");
         assert_eq!(
             list_memories_at(&path),
-            vec![("remember-the-milk".to_string(), "Remember the milk".to_string())]
+            vec![(
+                "remember-the-milk".to_string(),
+                "Remember the milk".to_string()
+            )]
         );
     }
 
@@ -216,8 +222,14 @@ mod tests {
         assert_eq!(
             list_memories_at(&path),
             vec![
-                ("deploy-on-friday".to_string(), "Deploy on Friday".to_string()),
-                ("calls-mom-on-sunday".to_string(), "Calls mom on Sunday".to_string()),
+                (
+                    "deploy-on-friday".to_string(),
+                    "Deploy on Friday".to_string()
+                ),
+                (
+                    "calls-mom-on-sunday".to_string(),
+                    "Calls mom on Sunday".to_string()
+                ),
             ]
         );
     }

@@ -1,20 +1,22 @@
-use alfred::{cli, config, config_watch, connectors, jobs, paths, pi, scheduler, server, skills, store};
+use alfred::{
+    cli, config, config_watch, connectors, jobs, paths, pi, scheduler, server, skills, store,
+};
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
+use std::sync::Arc;
 use std::time::Instant;
 
 use clap::Parser;
 use tokio::sync::Mutex;
-use tracing::{info, error};
+use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
 use cli::Cli;
 use config::load_config;
-use connectors::Connector;
 use connectors::telegram::{shutdown_sessions, Session, TelegramConnector};
+use connectors::Connector;
 use jobs::dispatch::JobDispatch;
 use paths::Paths;
 use scheduler::{Scheduler, SchedulerConfig, SystemClock};
@@ -36,7 +38,11 @@ fn ensure_directories() {
     for dir in &dirs {
         if !dir.exists() {
             if let Err(e) = std::fs::create_dir_all(dir) {
-                eprintln!("Warning: Could not create directory {}: {}", dir.display(), e);
+                eprintln!(
+                    "Warning: Could not create directory {}: {}",
+                    dir.display(),
+                    e
+                );
             }
         }
     }
@@ -50,7 +56,11 @@ fn auto_generate_config_files() {
     // Check for legacy config in current directory first
     let legacy_config = Path::new(DEFAULT_CONFIG_PATH);
     if legacy_config.exists() && !config_path.exists() {
-        println!("Found legacy config at {}. Migrating to {}...", legacy_config.display(), config_path.display());
+        println!(
+            "Found legacy config at {}. Migrating to {}...",
+            legacy_config.display(),
+            config_path.display()
+        );
         if let Err(e) = std::fs::copy(legacy_config, &config_path) {
             eprintln!("Failed to migrate config: {}", e);
         }
@@ -60,8 +70,14 @@ fn auto_generate_config_files() {
     if !config_path.exists() {
         if Path::new(EXAMPLE_CONFIG_PATH).exists() {
             println!("Alfred is starting for the first time.");
-            println!("  Creating config directory: {}", Paths::config_dir().display());
-            println!("  Please edit {} and fill in your API keys.", config_path.display());
+            println!(
+                "  Creating config directory: {}",
+                Paths::config_dir().display()
+            );
+            println!(
+                "  Please edit {} and fill in your API keys.",
+                config_path.display()
+            );
             println!();
             if let Err(e) = std::fs::copy(EXAMPLE_CONFIG_PATH, &config_path) {
                 eprintln!("  Failed to generate config: {}", e);
@@ -109,7 +125,9 @@ async fn main() {
         .expect("Failed to open log file");
 
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
         .with_writer(std::sync::Mutex::new(log_file))
         .init();
 
@@ -251,14 +269,19 @@ async fn run_server_mode(config_path: &Option<String>) {
     // Watch the config file(s) and reject invalid changes without a restart.
     let watch_paths = config_watch::watch_paths(Path::new(&config_path_str));
     {
-        let path_list: Vec<String> = watch_paths.iter().map(|p| p.display().to_string()).collect();
+        let path_list: Vec<String> = watch_paths
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect();
         info!("Watching config for changes: {}", path_list.join(", "));
     }
     handles.push(tokio::spawn(async move {
         config_watch::watch_config(watch_paths).await;
     }));
 
-    tokio::signal::ctrl_c().await.expect("failed to listen for ctrl-c");
+    tokio::signal::ctrl_c()
+        .await
+        .expect("failed to listen for ctrl-c");
     info!("Shutting down...");
 
     for handle in handles {
@@ -274,7 +297,9 @@ async fn run_server_mode(config_path: &Option<String>) {
     }
 }
 
-async fn initialize_state(config: &config::AppConfig) -> Result<AppState, Box<dyn std::error::Error>> {
+async fn initialize_state(
+    config: &config::AppConfig,
+) -> Result<AppState, Box<dyn std::error::Error>> {
     let store = Arc::new(Store::new(config.database_path().as_path())?);
     let pi_version = server::probe_pi_version(&config.pi.binary);
 

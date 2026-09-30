@@ -204,7 +204,10 @@ mod rest_api {
             .json()
             .await
             .expect("info json");
-        assert!(info.get("pi_version").is_some(), "info must carry pi_version: {info}");
+        assert!(
+            info.get("pi_version").is_some(),
+            "info must carry pi_version: {info}"
+        );
         assert_eq!(info["jobs_enabled"], 0);
 
         server
@@ -366,7 +369,10 @@ mod rest_api {
             .expect("post");
         assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
         let text = resp.text().await.expect("body");
-        assert!(text.contains("minimum watch interval is 900s"), "body was: {text}");
+        assert!(
+            text.contains("minimum watch interval is 900s"),
+            "body was: {text}"
+        );
     }
 
     #[tokio::test]
@@ -474,7 +480,10 @@ mod rest_api {
             .expect("created json");
         let id = created["id"].as_str().expect("id").to_string();
 
-        server.store.record_run_start(&id).expect("record run start");
+        server
+            .store
+            .record_run_start(&id)
+            .expect("record run start");
 
         let runs: Vec<Value> = server
             .client
@@ -645,7 +654,9 @@ mod rest_api {
             .await
             .expect("list json");
         assert!(
-            listed.iter().any(|m| m["slug"] == "round-trip-memory" && m["text"] == "Round trip memory"),
+            listed
+                .iter()
+                .any(|m| m["slug"] == "round-trip-memory" && m["text"] == "Round trip memory"),
             "appended memory missing from {listed:?}"
         );
 

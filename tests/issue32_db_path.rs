@@ -14,7 +14,10 @@ use alfred::store::Store;
 fn config_body(db_path: Option<&Path>) -> String {
     let db_line = match db_path {
         // Forward slashes so Windows paths need no TOML escaping.
-        Some(path) => format!("db_path = \"{}\"\n", path.to_string_lossy().replace('\\', "/")),
+        Some(path) => format!(
+            "db_path = \"{}\"\n",
+            path.to_string_lossy().replace('\\', "/")
+        ),
         None => String::new(),
     };
     format!(
@@ -38,7 +41,10 @@ fn two_data_dirs_produce_two_databases() {
 
     let first_db = resolve_database_path(&config, Some(first.path()));
     let second_db = resolve_database_path(&config, Some(second.path()));
-    assert_ne!(first_db, second_db, "different data dirs must resolve differently");
+    assert_ne!(
+        first_db, second_db,
+        "different data dirs must resolve differently"
+    );
 
     let first_store = Store::new(&first_db).expect("open first store");
     first_store
@@ -54,7 +60,10 @@ fn two_data_dirs_produce_two_databases() {
             .is_empty(),
         "the second database must be independent"
     );
-    assert!(first_db.exists() && second_db.exists(), "both databases exist");
+    assert!(
+        first_db.exists() && second_db.exists(),
+        "both databases exist"
+    );
 }
 
 #[test]
@@ -65,15 +74,20 @@ fn explicit_db_path_is_used_when_the_override_is_unset() {
 
     assert_eq!(resolve_database_path(&config, None), custom);
     Store::new(&custom).expect("open custom store");
-    assert!(custom.exists(), "the explicit database is created where configured");
+    assert!(
+        custom.exists(),
+        "the explicit database is created where configured"
+    );
 }
 
 #[test]
 fn data_dir_override_beats_an_explicit_db_path() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let config =
-        load_config(&write_config(dir.path(), Some(Path::new("/elsewhere/other.db"))))
-            .expect("load config");
+    let config = load_config(&write_config(
+        dir.path(),
+        Some(Path::new("/elsewhere/other.db")),
+    ))
+    .expect("load config");
     let override_dir = dir.path().join("override");
 
     assert_eq!(

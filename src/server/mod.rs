@@ -1,13 +1,13 @@
 pub mod routes;
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
-use axum::{Router, routing::get};
 use axum::extract::Request;
 use axum::middleware::{self, Next};
 use axum::response::Response;
+use axum::{routing::get, Router};
 use tokio::net::TcpListener;
 use tracing::info;
 
@@ -53,7 +53,11 @@ pub fn probe_pi_version(binary: &str) -> Option<String> {
     }
 }
 
-async fn connection_tracker(state: axum::extract::State<AppState>, req: Request, next: Next) -> Response {
+async fn connection_tracker(
+    state: axum::extract::State<AppState>,
+    req: Request,
+    next: Next,
+) -> Response {
     state.active_connections.fetch_add(1, Ordering::Relaxed);
     let response = next.run(req).await;
     state.active_connections.fetch_sub(1, Ordering::Relaxed);
@@ -70,9 +74,15 @@ pub fn app(state: AppState) -> Router {
         .route("/api/info", get(routes::server_info))
         .route("/api/todos", get(routes::list_todos))
         .route("/api/todos", axum::routing::post(routes::add_todo))
-        .route("/api/todos/{id}", axum::routing::delete(routes::delete_todo))
+        .route(
+            "/api/todos/{id}",
+            axum::routing::delete(routes::delete_todo),
+        )
         .route("/api/todos/{id}", axum::routing::put(routes::update_todo))
-        .route("/api/todos/{id}/complete", axum::routing::post(routes::complete_todo))
+        .route(
+            "/api/todos/{id}/complete",
+            axum::routing::post(routes::complete_todo),
+        )
         .route("/api/jobs", get(routes::list_jobs))
         .route("/api/jobs", axum::routing::post(routes::create_job))
         .route("/api/jobs/{id}", get(routes::get_job))
@@ -82,8 +92,14 @@ pub fn app(state: AppState) -> Router {
         .route("/api/jobs/{id}/runs", get(routes::list_job_runs))
         .route("/api/memories", get(routes::list_memories))
         .route("/api/memories", axum::routing::post(routes::add_memory))
-        .route("/api/memories/{slug}", axum::routing::delete(routes::delete_memory))
-        .layer(middleware::from_fn_with_state(state.clone(), connection_tracker))
+        .route(
+            "/api/memories/{slug}",
+            axum::routing::delete(routes::delete_memory),
+        )
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            connection_tracker,
+        ))
         .with_state(state)
 }
 

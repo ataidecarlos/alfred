@@ -75,7 +75,10 @@ pub struct CompactPolicy {
 
 impl CompactPolicy {
     pub fn new(idle_compact_secs: u64, compact_token_threshold: u64) -> Self {
-        Self { idle_compact_secs, compact_token_threshold }
+        Self {
+            idle_compact_secs,
+            compact_token_threshold,
+        }
     }
 
     /// Should the session be compacted?
@@ -183,7 +186,10 @@ impl<'a, T: CompactionTarget> SessionSupervisor<'a, T> {
             }
         };
 
-        if !self.policy.should_compact(self.target.last_activity(), now, tokens) {
+        if !self
+            .policy
+            .should_compact(self.target.last_activity(), now, tokens)
+        {
             return TickOutcome::NotDue { tokens };
         }
 
@@ -204,10 +210,7 @@ impl<'a, T: CompactionTarget> SessionSupervisor<'a, T> {
 }
 
 /// One supervisor pass over every channel session.
-pub async fn tick_all(
-    sessions: &Arc<Mutex<HashMap<String, Session>>>,
-    policy: CompactPolicy,
-) {
+pub async fn tick_all(sessions: &Arc<Mutex<HashMap<String, Session>>>, policy: CompactPolicy) {
     let now = Instant::now();
     let mut guard = sessions.lock().await;
     for (channel, session) in guard.iter_mut() {
@@ -286,8 +289,7 @@ impl Session {
 
     /// Spawn the Pi subprocess for this channel.
     pub async fn start(&mut self) -> Result<(), AlfredError> {
-        let client =
-            PiClient::spawn(&self.invocation.binary, self.invocation.command()).await?;
+        let client = PiClient::spawn(&self.invocation.binary, self.invocation.command()).await?;
         self.client = Some(client);
         self.dead = false;
         Ok(())
@@ -323,7 +325,9 @@ impl Session {
         if !response.success {
             return Err(AlfredError::Pi(format!(
                 "prompt rejected: {}",
-                response.error.unwrap_or_else(|| "unknown error".to_string())
+                response
+                    .error
+                    .unwrap_or_else(|| "unknown error".to_string())
             )));
         }
 
@@ -370,7 +374,9 @@ impl Session {
         if !response.success {
             return Err(AlfredError::Pi(format!(
                 "new_session rejected: {}",
-                response.error.unwrap_or_else(|| "unknown error".to_string())
+                response
+                    .error
+                    .unwrap_or_else(|| "unknown error".to_string())
             )));
         }
         self.last_activity = Instant::now();
@@ -384,7 +390,9 @@ impl Session {
         if !response.success {
             return Err(AlfredError::Pi(format!(
                 "compact rejected: {}",
-                response.error.unwrap_or_else(|| "unknown error".to_string())
+                response
+                    .error
+                    .unwrap_or_else(|| "unknown error".to_string())
             )));
         }
         Ok(())
@@ -396,7 +404,9 @@ impl Session {
         if !response.success {
             return Err(AlfredError::Pi(format!(
                 "get_state rejected: {}",
-                response.error.unwrap_or_else(|| "unknown error".to_string())
+                response
+                    .error
+                    .unwrap_or_else(|| "unknown error".to_string())
             )));
         }
         Ok(response
@@ -413,7 +423,9 @@ impl Session {
         if !response.success {
             return Err(AlfredError::Pi(format!(
                 "get_session_stats rejected: {}",
-                response.error.unwrap_or_else(|| "unknown error".to_string())
+                response
+                    .error
+                    .unwrap_or_else(|| "unknown error".to_string())
             )));
         }
         let tokens = response
@@ -655,7 +667,10 @@ mod tests {
 
         assert_eq!(outcome, TickOutcome::Compacted { tokens: 15 });
         assert_eq!(spy.compact_calls, 1, "the compact command must be emitted");
-        assert_eq!(spy.noted, 1, "the idle baseline must reset after compaction");
+        assert_eq!(
+            spy.noted, 1,
+            "the idle baseline must reset after compaction"
+        );
     }
 
     #[tokio::test]
@@ -694,7 +709,10 @@ mod tests {
         let outcome = supervisor.tick(t0 + Duration::from_secs(90)).await;
 
         assert_eq!(outcome, TickOutcome::SkippedWhileStreaming);
-        assert_eq!(spy.compact_calls, 0, "a streaming session must not be compacted");
+        assert_eq!(
+            spy.compact_calls, 0,
+            "a streaming session must not be compacted"
+        );
     }
 
     #[tokio::test]
@@ -710,7 +728,10 @@ mod tests {
             let outcome = supervisor.tick(t0 + Duration::from_secs(90)).await;
             assert_eq!(outcome, TickOutcome::CompactFailed);
             assert_eq!(spy.compact_calls, 1);
-            assert_eq!(spy.noted, 0, "a failed compact must not reset the idle baseline");
+            assert_eq!(
+                spy.noted, 0,
+                "a failed compact must not reset the idle baseline"
+            );
         }
 
         // Next tick: the failure has cleared and the still-idle session retries.

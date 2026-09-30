@@ -36,7 +36,9 @@ pub fn watch_paths(active: &Path) -> Vec<PathBuf> {
 }
 
 fn modified(path: &Path) -> Option<SystemTime> {
-    std::fs::metadata(path).and_then(|meta| meta.modified()).ok()
+    std::fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .ok()
 }
 
 /// Poll `paths` forever, re-validating the configuration whenever one changes.

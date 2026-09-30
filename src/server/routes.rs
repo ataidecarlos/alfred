@@ -1,8 +1,8 @@
-use axum::extract::{Path, State, Json};
-use axum::http::StatusCode;
+use axum::extract::FromRequestParts;
+use axum::extract::{Json, Path, State};
 use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
-use axum::extract::FromRequestParts;
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -19,9 +19,14 @@ pub struct AuthUser;
 impl FromRequestParts<AppState> for AuthUser {
     type Rejection = StatusCode;
 
-    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
         if let Some(ref required_key) = state.api_key {
-            let auth_header = parts.headers.get(AUTHORIZATION)
+            let auth_header = parts
+                .headers
+                .get(AUTHORIZATION)
                 .and_then(|v| v.to_str().ok())
                 .and_then(|v| v.strip_prefix("Bearer "));
 
@@ -47,7 +52,10 @@ pub struct ApiError {
 
 impl ApiError {
     fn new(status: StatusCode, message: impl Into<String>) -> Self {
-        Self { status, message: message.into() }
+        Self {
+            status,
+            message: message.into(),
+        }
     }
 }
 
@@ -104,7 +112,9 @@ pub async fn server_info(State(state): State<AppState>) -> Result<Json<ServerInf
         pid: std::process::id(),
         port: state.port,
         uptime_secs: state.start_time.elapsed().as_secs(),
-        active_connections: state.active_connections.load(std::sync::atomic::Ordering::Relaxed),
+        active_connections: state
+            .active_connections
+            .load(std::sync::atomic::Ordering::Relaxed),
         pi_version: state.pi_version.clone(),
         jobs_enabled,
     }))
@@ -125,14 +135,19 @@ pub async fn list_todos(
     _auth: AuthUser,
 ) -> Result<Json<Vec<TodoItem>>, StatusCode> {
     match state.store.list_todos() {
-        Ok(todos) => Ok(Json(todos.into_iter().map(|t| TodoItem {
-            id: t.id,
-            title: t.title,
-            description: t.description,
-            priority: t.priority,
-            completed: t.completed,
-            due_date: t.due_date,
-        }).collect())),
+        Ok(todos) => Ok(Json(
+            todos
+                .into_iter()
+                .map(|t| TodoItem {
+                    id: t.id,
+                    title: t.title,
+                    description: t.description,
+                    priority: t.priority,
+                    completed: t.completed,
+                    due_date: t.due_date,
+                })
+                .collect(),
+        )),
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
 }
@@ -148,14 +163,19 @@ pub struct AddTodoRequest {
     pub due: String,
 }
 
-fn default_priority() -> String { "medium".into() }
+fn default_priority() -> String {
+    "medium".into()
+}
 
 pub async fn add_todo(
     State(state): State<AppState>,
     _auth: AuthUser,
     Json(req): Json<AddTodoRequest>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    match state.store.add_todo(&req.title, &req.description, &req.priority, &req.due) {
+    match state
+        .store
+        .add_todo(&req.title, &req.description, &req.priority, &req.due)
+    {
         Ok(id) => Ok(Json(serde_json::json!({"id": id}))),
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
@@ -280,7 +300,9 @@ pub async fn create_job(
     _auth: AuthUser,
     Json(body): Json<JobBody>,
 ) -> Result<(StatusCode, Json<Job>), ApiError> {
-    let job = state.store.add_job(&body.into(), min_watch_interval_secs(&state))?;
+    let job = state
+        .store
+        .add_job(&body.into(), min_watch_interval_secs(&state))?;
     Ok((StatusCode::CREATED, Json(job)))
 }
 
@@ -298,9 +320,11 @@ pub async fn update_job(
     Path(id): Path<String>,
     Json(body): Json<JobBody>,
 ) -> Result<Json<Job>, ApiError> {
-    Ok(Json(
-        state.store.update_job(&id, &body.into(), min_watch_interval_secs(&state))?,
-    ))
+    Ok(Json(state.store.update_job(
+        &id,
+        &body.into(),
+        min_watch_interval_secs(&state),
+    )?))
 }
 
 pub async fn delete_job(
